@@ -35,7 +35,10 @@ def test_a_database_at_0001_upgrades_cleanly_and_keeps_its_rows(tmp_path: Path):
     )
     conn.commit()
 
-    assert run_migrations(conn, db_module.MIGRATIONS_DIR) == ["0002_order_item_delivery.sql"]
+    assert run_migrations(conn, db_module.MIGRATIONS_DIR) == [
+        "0002_order_item_delivery.sql",
+        "0003_variant_file_name.sql",
+    ]
 
     assert "delivered_at" in _columns(conn, "order_items")
     row = conn.execute("SELECT product_name, delivered_at FROM order_items").fetchone()
@@ -43,7 +46,11 @@ def test_a_database_at_0001_upgrades_cleanly_and_keeps_its_rows(tmp_path: Path):
     versions = [
         r["version"] for r in conn.execute("SELECT version FROM schema_migrations ORDER BY version")
     ]
-    assert versions == ["0001_init.sql", "0002_order_item_delivery.sql"]
+    assert versions == [
+        "0001_init.sql",
+        "0002_order_item_delivery.sql",
+        "0003_variant_file_name.sql",
+    ]
     conn.close()
 
 

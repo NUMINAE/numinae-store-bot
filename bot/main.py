@@ -23,7 +23,16 @@ from telegram.ext import (
 from . import jobs, ratelimit
 from .config import get_settings
 from .db import MigrationError, init_db
-from .handlers import admin_catalogue, catalogue, checkout, library, payments, router
+from .handlers import (
+    admin_catalogue,
+    admin_orders,
+    admin_uploads,
+    catalogue,
+    checkout,
+    library,
+    payments,
+    router,
+)
 from .handlers import cart as cart_handlers
 from .handlers.common import (
     get_lang,
@@ -36,16 +45,25 @@ from .handlers.common import (
 from .i18n import t
 from .keyboards import main_reply_keyboard
 from .payments.registry import build_provider
+from .redact import RedactingFormatter
 from .repo import admin_pending as admin_pending_repo
 from .seed_demo import seed_demo
 from .tg import IgnoreUpdate
 
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
 
 def configure_logging() -> None:
-    logging.basicConfig(
-        level=get_settings().log_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    """Root logging with every handler formatted through RedactingFormatter, so
+    a token that slips into a log message, its args or a traceback is redacted
+    in the final output."""
+    root = logging.getLogger()
+    if not root.handlers:
+        root.addHandler(logging.StreamHandler())
+    formatter = RedactingFormatter(LOG_FORMAT)
+    for handler in root.handlers:
+        handler.setFormatter(formatter)
+    root.setLevel(get_settings().log_level)
     # httpx/httpcore log outgoing request URLs at INFO, and those URLs embed
     # the bot token — must stay above INFO regardless of LOG_LEVEL.
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -115,6 +133,7 @@ def build_application() -> Application:
     application.add_handler(
         CommandHandler("admin", admin_catalogue.dashboard, filters=filters.User(settings.owner_id))
     )
+    application.add_handler(CommandHandler("order", admin_orders.find_order))
     application.add_handler(CommandHandler("paysupport", payments.paysupport))
     # /sweep is owner-only through its decorator, so a stranger is told so
     # rather than silently ignored.
@@ -135,6 +154,16 @@ def build_application() -> Application:
 
     # The single free-text handler must come before the catch-all too.
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, router.route_text))
+    # Owner uploads (delivery files, licence-key .txt files). Documents from anyone
+    # else, or without a pending prompt, only get a nudge: nothing is stored or
+    # downloaded. Other media is only acted on while a file/keys prompt is open.
+    application.add_handler(MessageHandler(filters.Document.ALL, admin_uploads.on_document))
+    application.add_handler(
+        MessageHandler(
+            filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE | filters.Sticker.ALL,
+            admin_uploads.on_other_media,
+        )
+    )
 
     # Catch-all must be registered last so it only matches callbacks no
     # earlier handler recognized.

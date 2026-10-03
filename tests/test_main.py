@@ -42,7 +42,7 @@ def test_build_application_registers_the_expected_handlers(boot_env):
     assert any(isinstance(h, TypeHandler) and h.type is Update for h in application.handlers[-1])
 
     commands = {c for h in handlers if isinstance(h, CommandHandler) for c in h.commands}
-    assert commands == {"start", "admin", "paysupport", "sweep"}
+    assert commands == {"start", "admin", "paysupport", "sweep", "order"}
 
     patterns = {
         h.pattern.pattern
@@ -61,7 +61,13 @@ def test_build_application_registers_the_expected_handlers(boot_env):
     }
 
     message_handlers = [h for h in handlers if isinstance(h, MessageHandler)]
-    assert len(message_handlers) == 2  # free text + successful_payment; no photo handler
+    # free text, successful_payment, owner uploads (documents) and the other-media hint
+    assert {h.callback.__name__ for h in message_handlers} == {
+        "route_text",
+        "successful_payment",
+        "on_document",
+        "on_other_media",
+    }
     assert len([h for h in handlers if isinstance(h, PreCheckoutQueryHandler)]) == 1
 
     catch_all = [h for h in handlers if isinstance(h, CallbackQueryHandler) and h.pattern is None]
@@ -150,6 +156,9 @@ def test_main_boots_in_mock_mode_and_registers_every_handler(boot_env, monkeypat
         "lang_route",
         "unknown_callback",
         "throttle",
+        "find_order",
+        "on_document",
+        "on_other_media",
     ):
         assert name in callbacks, name
     patterns = {
@@ -160,3 +169,20 @@ def test_main_boots_in_mock_mode_and_registers_every_handler(boot_env, monkeypat
     assert {r"^co:", r"^lib:", r"^cat:", r"^cart:", r"^adm:"} <= patterns
     assert [j.name for j in application.job_queue.jobs()] == ["sweep_job"]
     assert db_module.get_conn().execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 3
+
+
+def test_uploads_and_order_handlers_are_registered_before_the_catch_all(boot_env):
+    application = main.build_application()
+    group0 = application.handlers[0]
+    names = [getattr(h, "callback", None) and h.callback.__name__ for h in group0]
+    catch_all = next(
+        i for i, h in enumerate(group0) if isinstance(h, CallbackQueryHandler) and h.pattern is None
+    )
+    for name in (
+        "find_order",
+        "on_document",
+        "on_other_media",
+        "pre_checkout",
+        "successful_payment",
+    ):
+        assert names.index(name) < catch_all, name

@@ -36,6 +36,25 @@ def create(product_id: int, label: str, price_stars: int, delivery_kind: str) ->
         return cur.lastrowid  # type: ignore[return-value]  # lastrowid is always set after an INSERT
 
 
+def set_delivery_file(variant_id: int, file_id: str, file_name: str | None) -> None:
+    """Store the uploaded file's Telegram file_id and original name. Only file
+    editions take a file; replacing an existing one is allowed (existing buyers
+    then re-download the new file)."""
+    with transaction() as conn:
+        row = conn.execute(
+            "SELECT delivery_kind FROM product_variants WHERE id = ?", (variant_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Edition {variant_id} does not exist.")
+        if row["delivery_kind"] != "file":
+            raise ValueError("Only file editions take an uploaded file.")
+        conn.execute(
+            "UPDATE product_variants SET delivery_file_id = ?, delivery_file_name = ?,"
+            " updated_at = datetime('now') WHERE id = ?",
+            (file_id, file_name, variant_id),
+        )
+
+
 def update_label(variant_id: int, label: str) -> None:
     with transaction() as conn:
         conn.execute(

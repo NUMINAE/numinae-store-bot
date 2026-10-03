@@ -15,6 +15,7 @@ from telegram.error import TelegramError
 
 from ..i18n import t
 from ..keyboards import cb
+from ..redact import redact
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +91,12 @@ class StarsProvider:
             return bool(
                 await bot.refund_star_payment(user_id=user_id, telegram_payment_charge_id=charge_id)
             )
-        except TelegramError:
+        except TelegramError as exc:
+            # No exc_info: HTTP error text can quote a URL carrying the bot token.
             logger.error(
-                "Star refund failed (user_id=%s, charge_id=%s)", user_id, charge_id, exc_info=True
+                "Star refund failed (user_id=%s, charge_id=%s): %s",
+                user_id,
+                charge_id,
+                redact(str(exc)),
             )
             return False

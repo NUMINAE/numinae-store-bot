@@ -115,7 +115,7 @@ def test_new_payment_and_delivery_strings_have_identical_placeholders_in_en_and_
     def fields(template: str) -> set[str]:
         return {name for _, name, _, _ in string.Formatter().parse(template) if name}
 
-    prefixes = ("pay.", "deliver.", "checkout.", "library.", "jobs.", "cart.over_limit")
+    prefixes = ("pay.", "deliver.", "checkout.", "library.", "jobs.", "owner.", "cart.over_limit")
     new_keys = [k for k in i18n.STRINGS if k.startswith(prefixes)]
     assert new_keys, "expected R2 string groups to exist"
     for key in new_keys:

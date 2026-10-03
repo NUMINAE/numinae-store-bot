@@ -22,10 +22,16 @@ OTHER = 3002
 
 
 @pytest.fixture(autouse=True)
-def clean_alerts():
+def clock(monkeypatch):
+    """Sweep state is module-level: isolate it, and run on an injectable clock
+    (seconds; tests advance it to move past a backoff)."""
     jobs._alerted.clear()
-    yield
+    jobs._retry.clear()
+    now = [1000.0]
+    monkeypatch.setattr(jobs, "_now", lambda: now[0])
+    yield now
     jobs._alerted.clear()
+    jobs._retry.clear()
 
 
 def fake_bot() -> SimpleNamespace:
@@ -121,7 +127,7 @@ async def test_a_notification_helper_that_raises_is_isolated_too(db, monkeypatch
 # --- delivery retries -------------------------------------------------------------------------
 
 
-async def test_delivery_is_retried_and_succeeds_on_the_next_pass(db):
+async def test_delivery_is_retried_and_succeeds_on_the_next_pass(db, clock):
     order_id = place_order(USER, {TEXT: 1, KEY: 1})
     pay(order_id)
     broken = fake_bot()
@@ -131,6 +137,7 @@ async def test_delivery_is_retried_and_succeeds_on_the_next_pass(db):
     assert first == (1, 0, 0, 1)  # examined 1, one order failed
     assert orders_repo.get(order_id)["status"] == "paid"
 
+    clock[0] += 61  # past the one-minute backoff
     healthy = fake_bot()
     second = await jobs.run_sweep(healthy)
     assert second == (1, 0, 1, 0)
@@ -158,7 +165,7 @@ async def test_one_orders_delivery_crash_does_not_stop_the_others(db, monkeypatc
     report = await jobs.run_sweep(fake_bot())
     assert report.delivered == 1 and report.failed == 1
     assert orders_repo.get(second)["status"] == "delivered"
-    assert any("delivery retry failed" in r.getMessage() for r in caplog.records)
+    assert any("delivery attempt crashed" in r.getMessage() for r in caplog.records)
 
 
 # --- stuck-order owner alerts -----------------------------------------------------------------
@@ -266,3 +273,171 @@ async def test_sweep_command_refuses_non_owners_and_does_nothing(db):
     assert "not authorized" in message.reply_text.await_args.args[0]
     assert orders_repo.get(expired)["status"] == "pending_payment"  # no pass ran
     context.bot.send_message.assert_not_called()
+
+
+# --- delivery retry backoff (injected clock) ------------------------------------------
+
+
+def blocked_bot() -> SimpleNamespace:
+    bot = fake_bot()
+
+    async def send(**kwargs):
+        if kwargs["chat_id"] == USER:
+            raise Forbidden("blocked")
+
+    bot.send_message.side_effect = send
+    return bot
+
+
+def attempts(bot) -> int:
+    """Delivery attempts the customer's chat saw (each failing send counts)."""
+    return len([c for c in bot.send_message.await_args_list if c.kwargs["chat_id"] == USER])
+
+
+def error_count(caplog) -> int:
+    return len(
+        [
+            r
+            for r in caplog.records
+            if r.levelno == logging.ERROR and "Delivery failed" in r.getMessage()
+        ]
+    )
+
+
+def test_the_backoff_schedule_doubles_and_caps_at_sixty_minutes():
+    assert [jobs.backoff_minutes(n) for n in range(1, 10)] == [1, 2, 4, 8, 16, 32, 60, 60, 60]
+
+
+async def test_a_failing_order_is_retried_on_the_backoff_schedule(db, clock, caplog):
+    caplog.set_level(logging.ERROR)
+    order_id = place_order(USER, {TEXT: 1})
+    pay(order_id)
+    bot = blocked_bot()
+
+    await jobs.run_sweep(bot)  # t=0: attempt 1 fails -> next in 1 min
+    assert attempts(bot) == 1 and error_count(caplog) == 1
+
+    clock[0] += 30
+    skipped = await jobs.run_sweep(bot)  # t=30s: backing off
+    clock[0] += 29
+    await jobs.run_sweep(bot)  # t=59s: still backing off
+    assert attempts(bot) == 1 and error_count(caplog) == 1  # one ERROR per attempt, not per sweep
+    assert skipped == (1, 0, 0, 0)  # examined, but not attempted
+
+    clock[0] += 2  # t=61s: past the 1-minute backoff -> attempt 2, next in 2 min
+    await jobs.run_sweep(bot)
+    assert attempts(bot) == 2 and error_count(caplog) == 2
+
+    clock[0] += 119  # 1m59s after attempt 2
+    await jobs.run_sweep(bot)
+    assert attempts(bot) == 2
+    clock[0] += 2  # past 2 minutes -> attempt 3, next in 4 min
+    await jobs.run_sweep(bot)
+    assert attempts(bot) == 3 and error_count(caplog) == 3
+
+    clock[0] += 239
+    await jobs.run_sweep(bot)
+    assert attempts(bot) == 3
+    clock[0] += 2  # past 4 minutes -> attempt 4, next in 8 min
+    await jobs.run_sweep(bot)
+    assert attempts(bot) == 4
+    assert jobs._retry[order_id].next_at - clock[0] == 8 * 60
+
+
+async def test_the_delay_never_exceeds_sixty_minutes(db, clock):
+    for _ in range(12):
+        jobs._record_failure(7)
+    assert jobs._retry[7].next_at - clock[0] == 60 * 60
+    assert jobs._retry[7].failures == 12
+
+
+async def test_a_successful_retry_clears_the_backoff(db, clock):
+    order_id = place_order(USER, {TEXT: 1})
+    pay(order_id)
+    await jobs.run_sweep(blocked_bot())
+    assert order_id in jobs._retry
+
+    clock[0] += 61
+    report = await jobs.run_sweep(fake_bot())
+    assert report.delivered == 1
+    assert order_id not in jobs._retry
+    assert orders_repo.get(order_id)["status"] == "delivered"
+
+
+async def test_backoff_state_for_orders_that_left_the_queue_is_forgotten(db, clock):
+    jobs._retry[424242] = jobs._Retry(3, clock[0] + 999)
+    await jobs.run_sweep(fake_bot())
+    assert 424242 not in jobs._retry
+
+
+async def test_retry_delivery_now_bypasses_and_resets_the_backoff(db, clock, caplog):
+    caplog.set_level(logging.ERROR)
+    order_id = place_order(USER, {TEXT: 1})
+    pay(order_id)
+    bot = blocked_bot()
+    for _ in range(3):  # fail three times, driving the delay up to 4 minutes
+        await jobs.run_sweep(bot)
+        clock[0] += 60 * 60
+    assert jobs._retry[order_id].failures == 3
+    clock[0] += 0
+    jobs._retry[order_id].next_at = clock[0] + 4 * 60  # mid-backoff
+
+    before = attempts(bot)
+    result = await jobs.retry_delivery_now(bot, order_id)  # not waiting for the schedule
+
+    assert attempts(bot) == before + 1  # it really attempted, ignoring the backoff
+    assert len(result.failed) == 1
+    state = jobs._retry[order_id]
+    assert state.failures == 1  # reset, then this failure counted afresh
+    assert state.next_at - clock[0] == 60  # next automatic retry in one minute, not eight
+
+
+async def test_retry_delivery_now_clears_the_backoff_on_success(db, clock):
+    order_id = place_order(USER, {TEXT: 1})
+    pay(order_id)
+    await jobs.run_sweep(blocked_bot())
+    assert order_id in jobs._retry
+
+    result = await jobs.retry_delivery_now(fake_bot(), order_id)
+
+    assert len(result.delivered) == 1 and result.failed == []
+    assert order_id not in jobs._retry
+    assert orders_repo.get(order_id)["status"] == "delivered"
+
+
+async def test_retry_delivery_now_survives_a_crash_and_starts_the_backoff(db, clock, monkeypatch):
+    order_id = place_order(USER, {TEXT: 1})
+    pay(order_id)
+
+    async def crash(bot, order_id):
+        raise RuntimeError("delivery bug")
+
+    monkeypatch.setattr(delivery, "deliver_order", crash)
+    result = await jobs.retry_delivery_now(fake_bot(), order_id)
+    assert result == ([], [])
+    assert jobs._retry[order_id].failures == 1
+
+
+async def test_sweep_command_ignores_the_backoff_because_the_owner_asked(db, clock):
+    add_customer(OWNER_ID)
+    order_id = place_order(USER, {TEXT: 1})
+    pay(order_id)
+    await jobs.run_sweep(blocked_bot())  # puts the order into backoff
+    assert order_id in jobs._retry
+    context = make_context()
+    message = make_message("/sweep")
+
+    await jobs.sweep_command(make_update(OWNER_ID, message=message), context)
+
+    assert orders_repo.get(order_id)["status"] == "delivered"  # attempted despite the backoff
+    assert "delivered 1" in message.reply_text.await_args.args[0]
+
+
+async def test_the_stuck_order_alert_still_fires_while_backing_off(db, clock):
+    order_id = place_order(USER, {TEXT: 1})
+    pay(order_id)
+    bot = blocked_bot()
+    await jobs.run_sweep(bot)  # fails -> backoff
+    age_payment(db, order_id, 45)
+    await jobs.run_sweep(bot)  # skipped for backoff, but the alert is independent
+    assert len([m for m in texts_to(bot, OWNER_ID) if "still undelivered" in m]) == 1

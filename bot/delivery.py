@@ -108,6 +108,9 @@ async def _deliver_order(bot: Bot, order_id: int) -> DeliveryResult:
     delivered: list[int] = []
     failed: list[int] = []
     for item in orders_repo.list_undelivered_items(order_id):
+        if not _still_paid(order_id):
+            logger.info("Delivery of order %s stopped: it is no longer paid", order_id)
+            return DeliveryResult(delivered, failed)
         try:
             await _send_item(bot, chat_id, item, lang)
         except Exception:
@@ -119,12 +122,27 @@ async def _deliver_order(bot: Bot, order_id: int) -> DeliveryResult:
             )
             failed.append(item["id"])
             continue
+        if not _still_paid(order_id):
+            # e.g. a refund landed while this send was in flight: change nothing.
+            logger.info("Delivery of order %s stopped mid-flight: it is no longer paid", order_id)
+            return DeliveryResult(delivered, failed)
         orders_repo.mark_item_delivered(item["id"])
         delivered.append(item["id"])
 
-    if not failed and orders_repo.finish_order_if_delivered(order_id):
-        await _send_receipt(bot, order_id, lang)
+    if not failed:
+        try:
+            moved = orders_repo.finish_order_if_delivered(order_id)
+        except orders_repo.IllegalTransitionError:
+            logger.info("Order %s left 'paid' before it could be marked delivered", order_id)
+            moved = False
+        if moved:
+            await _send_receipt(bot, order_id, lang)
     return DeliveryResult(delivered, failed)
+
+
+def _still_paid(order_id: int) -> bool:
+    order = orders_repo.get(order_id)
+    return order is not None and bool(order["status"] == "paid")
 
 
 async def deliver_item(bot: Bot, order_item_id: int) -> bool:

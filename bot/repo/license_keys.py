@@ -24,6 +24,21 @@ def add_many(variant_id: int, keys: list[str]) -> int:
     return added
 
 
+KEY_STATUSES = ("available", "reserved", "sold", "revoked")
+
+
+def count_by_status(variant_id: int) -> dict[str, int]:
+    """Key counts for an edition, every status present (zero-filled)."""
+    counts = dict.fromkeys(KEY_STATUSES, 0)
+    rows = get_conn().execute(
+        "SELECT status, COUNT(*) AS n FROM license_keys WHERE variant_id = ? GROUP BY status",
+        (variant_id,),
+    )
+    for row in rows:
+        counts[row["status"]] = row["n"]
+    return counts
+
+
 def count_available(variant_id: int) -> int:
     conn = get_conn()
     row = conn.execute(
@@ -103,3 +118,21 @@ def get_sold_keys(order_item_id: int) -> list[str]:
         .fetchall()
     )
     return [row["key_value"] for row in rows]
+
+
+def revoke_for_order_in(conn: sqlite3.Connection, order_id: int) -> int:
+    """sold -> revoked for this order's keys, so a refunded key can never be
+    sold again. Touches ONLY 'sold' keys; returns how many were revoked."""
+    cur = conn.execute(
+        f"""
+        UPDATE license_keys SET status = 'revoked'
+        WHERE status = 'sold' AND order_item_id IN ({_ORDER_ITEMS})
+        """,  # noqa: S608 - _ORDER_ITEMS is a fixed constant subquery
+        (order_id,),
+    )
+    return cur.rowcount
+
+
+def revoke_for_order(order_id: int) -> int:
+    with transaction() as conn:
+        return revoke_for_order_in(conn, order_id)

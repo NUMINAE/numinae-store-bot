@@ -82,10 +82,10 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # No pending admin input: fall through to the nudge so the owner can
         # still test the shop with their own account.
 
-    await _nudge(update, context)
+    await nudge(update, context)
 
 
-async def _nudge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def nudge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = require_user(update).id
     lang = get_lang(user_id)
     menu_text, keyboard = render_main_menu(user_id, lang)

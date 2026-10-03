@@ -17,12 +17,13 @@ from ..render import bold, esc, stars
 from ..repo import admin_pending as pending_repo
 from ..repo import categories as categories_repo
 from ..repo import license_keys as keys_repo
+from ..repo import orders as orders_repo
 from ..repo import products as products_repo
 from ..repo import variants as variants_repo
 from ..security import owner_only
 from ..tg import require_data, require_message, require_query, require_text, require_user
 from ..ui import show_screen
-from . import admin_common, admin_settings
+from . import admin_common, admin_orders, admin_settings, admin_stats, admin_uploads
 from .admin_common import Invalid
 
 PRODUCTS_PAGE_SIZE = 5
@@ -67,12 +68,17 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"Catalogue — {cat_count} categor{'y' if cat_count == 1 else 'ies'}, "
         f"{prod_count} product{'' if prod_count == 1 else 's'}",
     ]
+    attention = orders_repo.attention_count()
+    if attention:
+        lines.append(f"{attention} paid order{'' if attention == 1 else 's'} awaiting delivery")
     text = "\n".join(lines)
+    orders_label = f"Orders ({attention} need attention)" if attention else "Orders"
 
     keyboard = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("Catalogue", callback_data=cb("adm", "cat"))],
-            [InlineKeyboardButton("Orders", callback_data=cb("adm", "o"))],
+            [InlineKeyboardButton(orders_label, callback_data=cb("adm", "o"))],
+            [InlineKeyboardButton("Stats", callback_data=cb("adm", "st"))],
             [InlineKeyboardButton("Settings", callback_data=cb("adm", "set"))],
         ]
     )
@@ -571,7 +577,18 @@ async def show_variant_detail(
         f"Delivery: {_DELIVERY_NAMES[variant['delivery_kind']]}",
     ]
     if variant["delivery_kind"] == "key":
-        lines.append(f"Keys in stock: {keys_repo.count_available(variant_id)}")
+        stock = keys_repo.count_by_status(variant_id)
+        lines.append(
+            f"Keys: {stock['available']} available / {stock['reserved']} reserved / "
+            f"{stock['sold']} sold / {stock['revoked']} revoked"
+        )
+    elif variant["delivery_kind"] == "file":
+        if variant["delivery_file_id"]:
+            name = variant["delivery_file_name"] or "(unnamed)"
+            lines.append(f"File: {esc(name)}")
+            lines.append("Replacing the file updates what existing buyers can re-download.")
+        else:
+            lines.append("File: no file yet")
     lines += [
         f"Sort order: {variant['sort_order']}",
         f"Status: {_status_word(variant['is_active'])}",
@@ -602,6 +619,13 @@ async def show_variant_detail(
                 )
             ]
         )
+    if variant["delivery_kind"] == "file":
+        label = "Replace file" if variant["delivery_file_id"] else "Upload file"
+        rows.append([InlineKeyboardButton(label, callback_data=cb("adm", "va", "uf", variant_id))])
+    elif variant["delivery_kind"] == "key":
+        rows.append(
+            [InlineKeyboardButton("Add keys", callback_data=cb("adm", "va", "ak", variant_id))]
+        )
     rows.append(
         [
             InlineKeyboardButton(
@@ -618,7 +642,7 @@ def _delivery_warning(variant: sqlite3.Row) -> str | None:
     if kind == "text" and not (variant["delivery_text"] or "").strip():
         return "Hidden from customers: no delivery content yet (set the delivery text)."
     if kind == "file" and not variant["delivery_file_id"]:
-        return "Hidden from customers: no delivery content yet (file upload is not available yet)."
+        return "Hidden from customers: no delivery content yet (upload the file)."
     if kind == "key" and keys_repo.count_available(variant["id"]) == 0:
         return "Hidden from customers: no delivery content yet (no keys in stock)."
     return None
@@ -740,6 +764,10 @@ async def route_variant(
         await var_edit_price_prompt(update, context, variant_id)
     elif action == "dt":
         await var_delivery_text_prompt(update, context, variant_id)
+    elif action == "uf":
+        await admin_uploads.file_prompt(update, context, variant_id)
+    elif action == "ak":
+        await admin_uploads.keys_prompt(update, context, variant_id)
     elif action == "so":
         await var_edit_sort_prompt(update, context, variant_id)
     elif action == "tg":
@@ -781,7 +809,14 @@ async def cancel_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await show_product_detail(update, context, target)
     elif action in ("var_create_label", "var_create_price", "var_create_kind"):
         await show_variant_list(update, context, context_id)
-    elif action in ("var_edit_label", "var_edit_price", "var_edit_sort", "var_delivery_text"):
+    elif action in (
+        "var_edit_label",
+        "var_edit_price",
+        "var_edit_sort",
+        "var_delivery_text",
+        "var_file",
+        "var_keys",
+    ):
         await show_variant_detail(update, context, target)
     elif action == "set_value":
         await admin_settings.show_setting_detail(update, context, target)
@@ -1054,6 +1089,8 @@ _PENDING_HANDLERS = {
     "var_edit_price": _apply_var_edit_price,
     "var_edit_sort": _apply_var_edit_sort,
     "var_delivery_text": _apply_var_delivery_text,
+    "var_file": admin_uploads.apply_file_text,
+    "var_keys": admin_uploads.apply_pasted_keys,
     "set_value": admin_settings.apply_set_value,
 }
 
@@ -1075,7 +1112,11 @@ async def route(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if resource == "home":
         await dashboard(update, context)
     elif resource == "o":
-        await query.answer("Orders: coming soon.", show_alert=True)
+        await admin_orders.route_browse(update, context, parts)
+    elif resource == "ord":
+        await admin_orders.route_actions(update, context, parts)
+    elif resource == "st":
+        await admin_stats.show_stats(update, context)
     elif resource == "set":
         await admin_settings.route(update, context, parts)
     elif resource == "cancel":

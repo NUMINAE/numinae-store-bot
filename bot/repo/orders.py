@@ -702,3 +702,98 @@ def get_item_with_order(order_item_id: int) -> sqlite3.Row | None:
         )
         .fetchone()
     )
+
+
+# ---------------------------------------------------------------------------
+# Admin: listing, the order card, refunds
+# ---------------------------------------------------------------------------
+
+ADMIN_FILTERS = ("all", "pending_payment", "paid", "delivered", "refunded", "closed", "attention")
+
+# Fixed SQL fragments, chosen by a whitelisted key; user input never reaches them.
+_ADMIN_WHERE = {
+    "all": "1 = 1",
+    "pending_payment": "o.status = 'pending_payment'",
+    "paid": "o.status = 'paid'",
+    "delivered": "o.status = 'delivered'",
+    "refunded": "o.status = 'refunded'",
+    "closed": "o.status IN ('cancelled', 'expired')",
+    "attention": (
+        "o.status = 'paid' AND EXISTS ("
+        "SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.delivered_at IS NULL)"
+    ),
+}
+
+
+def _admin_where(filter_key: str) -> str:
+    try:
+        return _ADMIN_WHERE[filter_key]
+    except KeyError:
+        raise ValueError(f"Unknown order filter {filter_key!r}.") from None
+
+
+def list_for_admin(filter_key: str, limit: int, offset: int) -> list[sqlite3.Row]:
+    """Orders matching the filter, newest first."""
+    where = _admin_where(filter_key)
+    return (
+        get_conn()
+        .execute(
+            f"SELECT o.* FROM orders o WHERE {where} ORDER BY o.created_at DESC, o.id DESC"  # noqa: S608 - fixed whitelisted fragment
+            " LIMIT ? OFFSET ?",
+            (limit, offset),
+        )
+        .fetchall()
+    )
+
+
+def count_for_admin(filter_key: str) -> int:
+    where = _admin_where(filter_key)
+    row = (
+        get_conn()
+        .execute(f"SELECT COUNT(*) AS n FROM orders o WHERE {where}")  # noqa: S608 - fixed whitelisted fragment
+        .fetchone()
+    )
+    return int(row["n"])
+
+
+def counts_by_filter() -> dict[str, int]:
+    return {key: count_for_admin(key) for key in ADMIN_FILTERS}
+
+
+def attention_count() -> int:
+    """Paid orders with at least one undelivered item."""
+    return count_for_admin("attention")
+
+
+class AdminCard(NamedTuple):
+    order: sqlite3.Row
+    buyer: sqlite3.Row | None  # first_name, username, user_id
+    items: list[sqlite3.Row]  # incl. delivery_kind and delivered_at
+    events: list[sqlite3.Row]  # the last 5, oldest first
+
+
+def get_admin_card(order_id: int) -> AdminCard | None:
+    conn = get_conn()
+    order = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return None
+    buyer = conn.execute(
+        "SELECT first_name, username, user_id FROM customers WHERE user_id = ?",
+        (order["user_id"],),
+    ).fetchone()
+    items = conn.execute(
+        "SELECT * FROM order_items WHERE order_id = ? ORDER BY id", (order_id,)
+    ).fetchall()
+    events = conn.execute(
+        "SELECT * FROM order_events WHERE order_id = ? ORDER BY id DESC LIMIT 5", (order_id,)
+    ).fetchall()
+    return AdminCard(order, buyer, items, events[::-1])
+
+
+def mark_refunded(order_id: int, actor: str, note: str | None = None) -> int:
+    """paid or delivered -> refunded AND the order's sold keys -> revoked, in ONE
+    transaction: either both happen or neither. Raises IllegalTransitionError
+    from any other status. Returns the number of keys revoked."""
+    with immediate_transaction() as conn:
+        set_status_in_txn(conn, order_id, "refunded", actor, note=note or f"Refunded by {actor}")
+        return keys_repo.revoke_for_order_in(conn, order_id)

@@ -23,6 +23,7 @@ def make_message(text: str | None = None, message_id: int = 1) -> Any:
         edit_text=AsyncMock(),
         delete=AsyncMock(),
         successful_payment=None,
+        document=None,
     )
 
 
@@ -70,6 +71,7 @@ def make_context() -> Any:
             send_document=AsyncMock(),
             send_invoice=AsyncMock(),
             refund_star_payment=AsyncMock(),
+            get_file=AsyncMock(),
         ),
         job_queue=MagicMock(),
         user_data={},

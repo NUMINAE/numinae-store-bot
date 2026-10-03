@@ -102,6 +102,10 @@ def cancel_button() -> InlineKeyboardButton:
     return InlineKeyboardButton("Cancel", callback_data=cb("adm", "cancel"))
 
 
+def cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[cancel_button()]])
+
+
 async def prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
     keyboard = InlineKeyboardMarkup([[cancel_button()]])
     await show_screen(update, context, text=text, keyboard=keyboard)

@@ -301,6 +301,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Your order #{id} expired and its reservation was released. You can start a new one any time.",
         "ru": "Срок заказа №{id} истёк, резерв снят. Вы можете оформить новый заказ в любое время.",
     },
+    "owner.order_cancelled": {
+        "en": "Your order #{id} was cancelled by the shop.",
+        "ru": "Ваш заказ №{id} был отменён магазином.",
+    },
+    "owner.order_refunded": {
+        "en": "Your order #{id} was refunded ({total}). Things sent earlier cannot be taken back, but licence keys from this order are no longer valid.",
+        "ru": "Ваш заказ №{id} возвращён ({total}). Ранее отправленное нельзя забрать назад, но лицензионные ключи из этого заказа больше недействительны.",
+    },
     "library.heading": {"en": "My Library", "ru": "Моя библиотека"},
     "library.empty": {
         "en": "Your library is empty. Things you buy will appear here.",

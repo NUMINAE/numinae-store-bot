@@ -52,13 +52,14 @@ async def test_dashboard_has_catalogue_orders_and_settings_only(flow):
     update = make_update(OWNER_ID, message=make_message("/admin"), chat_id=OWNER_ID)
     await admin_catalogue.dashboard(update, flow.context)
     labels = [label for label, _ in sent_buttons(flow)]
-    assert labels == ["Catalogue", "Orders", "Settings"]
+    assert labels == ["Catalogue", "Orders", "Stats", "Settings"]
     assert "ayment" not in sent_text(flow)
 
 
-async def test_orders_button_says_coming_soon(flow):
+async def test_orders_button_opens_the_orders_screen(flow):
     await flow.tap(admin_catalogue.route, "adm:o")
-    assert flow.alert == "Orders: coming soon."
+    assert "Orders" in flow.text
+    assert "All (0)" in flow.labels() and "Back to admin" in flow.labels()
 
 
 async def test_old_payment_and_order_admin_routes_are_gone(flow):
@@ -124,7 +125,7 @@ async def test_the_kind_is_fixed_after_creation(flow):
 
 @pytest.mark.parametrize(
     ("kind", "hint"),
-    [("t", "set the delivery text"), ("k", "no keys in stock"), ("f", "file upload")],
+    [("t", "set the delivery text"), ("k", "no keys in stock"), ("f", "upload the file")],
 )
 async def test_unconfigured_edition_shows_a_hidden_warning(flow, kind, hint):
     await create_edition(flow, kind=kind)
@@ -134,7 +135,7 @@ async def test_unconfigured_edition_shows_a_hidden_warning(flow, kind, hint):
 
 async def test_key_edition_card_shows_stock_and_no_text_button(flow):
     await create_edition(flow, kind="k")
-    assert "Keys in stock: 0" in flow.text
+    assert "Keys: 0 available / 0 reserved / 0 sold / 0 revoked" in flow.text
     assert "Set delivery text" not in flow.labels()
 
 

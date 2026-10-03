@@ -2,7 +2,7 @@
 
 A Telegram bot storefront for digital goods — files, licence keys and guides for creators and developers — paid with Telegram Stars.
 
-**Status: work in progress.** Browsing, the cart, checkout (Telegram Stars or a demo mode), delivery and the customer library work; more admin tooling is still to come.
+**Status: work in progress.** Browsing, the cart, checkout (Telegram Stars or a demo mode), delivery, the customer library and the admin tools (uploads, keys, orders, refunds, stats) work.
 
 ## Setup (Windows / VS Code)
 
@@ -65,6 +65,24 @@ Orders keep the mode they were created in; an order from another mode is cancell
 
 The owner can run `/sweep` to trigger one sweep pass immediately; customers can use `/paysupport` for payment help.
 
+## Admin guide
+
+Everything below is done from the owner's account with `/admin`.
+
+**Uploading files.** Open an edition of kind *File* in the catalogue manager and tap *Upload file* (or *Replace file*), then send the file as a **File** (paperclip → File), not as a photo or video, so Telegram keeps it unchanged. The bot stores only Telegram's `file_id` and the file name — nothing is downloaded. Replacing the file changes what existing buyers get when they re-download from their library. Telegram file ids are scoped to the bot, so **if you change the bot token you must upload every file again**.
+
+**Adding licence keys.** Open an edition of kind *Key* and tap *Add keys*, then either paste the keys as a message or send a `.txt` file. One key per line; blank lines are ignored; spaces inside a key are fine. A line is rejected if it is longer than 200 characters or contains a control character. Duplicates (within the batch or already in stock) are skipped. At most 5000 keys per batch, and a `.txt` file may be at most 256 KB, UTF-8. The bot replies with counts and the numbers of rejected lines (at most ten) — it never repeats key text. The edition card shows stock as available / reserved / sold / revoked.
+
+**Orders.** *Orders* lists orders by filter (*Needs attention* is paid orders with an undelivered item); `/order <id>` opens one directly. The order card shows the buyer, timestamps, items, payment details and recent events, with actions by status: *Cancel order* (pending; releases the reserved keys, the buyer's cart is not restored), *Retry delivery* (paid), *Resend to buyer* (delivered) and *Refund*.
+
+**Refunds.** *Refund* returns the full amount to the buyer. For a Stars order Telegram is asked first, and the order is only marked refunded if that succeeds; a mock order never reaches Telegram. Refunding revokes the order's **sold licence keys** so they can never be sold again. Text and files that were already delivered **cannot be unsent**. The buyer is told. If Telegram refunds the money but the bot cannot record it, you get an alert with the charge id so you can reconcile by hand.
+
+**Stats.** Real (Stars) and demo (mock) figures are always shown separately. For each window, *gross* is the total of orders paid in that window (including ones refunded since), *refunded* is the total of orders refunded in that window, and *net* is gross minus refunded. A refund counts in the window it happened in, so a refund of an older sale can make the last 7 days' net negative. Windows are the last 7 days and all time. Top editions are units sold from paid or delivered orders, per payment mode.
+
+## Verification status
+
+Stars mode: invoice creation has been checked against live Telegram. Pre-checkout, payment confirmation and refunds are covered by automated tests against python-telegram-bot's types but have not been exercised with real Stars. Mock mode exercises the same internal payment path end to end.
+
 ## Project layout
 
 ```
@@ -75,6 +93,10 @@ bot/
   migrations/      0001_init.sql, ... applied in filename order
   seed_demo.py     optional demo catalogue (seed_demo.json)
   delivery.py      sending purchased goods
+  refunds.py       admin refunds (provider first, then the database)
+  stats.py         the numbers behind the Stats screen
+  keyparse.py      parsing pasted or uploaded licence keys
+  redact.py        keeping the bot token out of logs
   jobs.py          the recurring sweep and /sweep
   payments/        Stars and demo providers, the shared payability check
   limits.py        shared limits (the 25,000 Star order cap)

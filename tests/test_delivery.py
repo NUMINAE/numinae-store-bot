@@ -379,3 +379,80 @@ async def test_the_guard_is_per_order(db):
     gate.set()
     await asyncio.gather(running, other)
     assert delivery._in_flight == set()
+
+
+# --- the order leaving 'paid' mid-delivery --------------------------------------------
+
+
+async def test_a_refund_landing_mid_delivery_stops_it_quietly(db, caplog):
+    import asyncio
+
+    caplog.set_level(logging.INFO)
+    order_id = paid_order({TEXT: 1, 2: 1})  # two items
+    first, second = orders_repo.get_with_items(order_id)[1]
+    bot = fake_bot()
+    gate = asyncio.Event()
+    entered = asyncio.Event()
+
+    async def blocked_send(**kwargs):
+        entered.set()
+        await gate.wait()
+
+    bot.send_message.side_effect = blocked_send
+    running = asyncio.ensure_future(delivery.deliver_order(bot, order_id))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+
+    orders_repo.mark_refunded(order_id, "owner")  # the refund lands while the send is blocked
+    gate.set()
+    result = await running  # no exception
+
+    assert result == ([], [])  # nothing counted as delivered
+    order = orders_repo.get(order_id)
+    assert order["status"] == "refunded"  # never 'delivered'
+    assert len(bot.send_message.await_args_list) == 1  # the second item was never sent
+    items = orders_repo.get_with_items(order_id)[1]
+    assert [i["delivered_at"] for i in items] == [None, None]  # no state change from delivery
+    assert order_id not in delivery._in_flight  # the guard is free
+    assert any("stopped mid-flight" in r.getMessage() for r in caplog.records)
+    assert not any(r.levelno >= logging.ERROR for r in caplog.records)
+    assert first["id"] != second["id"]
+    # A later delivery attempt for the refunded order does nothing at all.
+    again = fake_bot()
+    assert await delivery.deliver_order(again, order_id) == ([], [])
+    again.send_message.assert_not_called()
+
+
+async def test_an_order_refunded_before_the_next_item_sends_nothing_more(db):
+    order_id = paid_order({TEXT: 1, 2: 1})
+    bot = fake_bot()
+    sent = []
+
+    async def send_then_refund(**kwargs):
+        sent.append(kwargs["text"])
+        if len(sent) == 1:
+            orders_repo.mark_refunded(order_id, "owner")  # lands between the two items
+
+    bot.send_message.side_effect = send_then_refund
+    result = await delivery.deliver_order(bot, order_id)
+
+    assert len(sent) == 1 and result == ([], [])
+    assert orders_repo.get(order_id)["status"] == "refunded"
+    assert order_id not in delivery._in_flight
+
+
+async def test_illegal_transition_on_the_final_move_is_caught_quietly(db, monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    order_id = paid_order({TEXT: 1})
+
+    def lost_the_race(oid):
+        raise orders_repo.IllegalTransitionError("refunded", "delivered")
+
+    monkeypatch.setattr(orders_repo, "finish_order_if_delivered", lost_the_race)
+    bot = fake_bot()
+    result = await delivery.deliver_order(bot, order_id)
+
+    assert len(result.delivered) == 1 and result.failed == []  # the item itself was sent
+    assert len(_texts(bot)) == 1  # but no receipt for an order that did not complete
+    assert order_id not in delivery._in_flight
+    assert any("left 'paid'" in r.getMessage() for r in caplog.records)
+    assert not any(r.levelno >= logging.WARNING for r in caplog.records)

@@ -57,6 +57,18 @@ ADM_ROUTES = [
     "adm:va:tgc:1",
     "adm:va:dt:1",
     "adm:va:ck:t",
+    "adm:va:uf:1",
+    "adm:va:ak:1",
+    "adm:o:l:all:0",
+    "adm:o:l:attention:0",
+    "adm:o:v:1",
+    "adm:ord:cancel:1",
+    "adm:ord:cancel:1:yes",
+    "adm:ord:retry:1",
+    "adm:ord:resend:1",
+    "adm:ord:refund:1",
+    "adm:ord:refund:1:yes",
+    "adm:st",
 ]
 
 
@@ -81,7 +93,8 @@ async def test_non_owner_is_refused_on_every_admin_route(db, monkeypatch, data):
 async def test_route_table_covers_every_action_in_source():
     root = Path(__file__).resolve().parent.parent / "bot" / "handlers"
     source = (root / "admin_catalogue.py").read_text(encoding="utf-8")
-    source += (root / "admin_settings.py").read_text(encoding="utf-8")
+    for name in ("admin_settings.py", "admin_orders.py", "admin_stats.py", "admin_uploads.py"):
+        source += (root / name).read_text(encoding="utf-8")
     # Route actions are bare words; pending-input actions ("set_value", ...) contain "_".
     actions = set(re.findall(r'action == "([a-z]+)"', source))
     actions |= set(re.findall(r'resource == "([a-z]+)"', source))

@@ -1,0 +1,16 @@
+.env
+data/
+__pycache__/
+.venv/
+*.db
+*.db-wal
+*.db-shm
+
+.claude/settings.local.json
+backups/
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/

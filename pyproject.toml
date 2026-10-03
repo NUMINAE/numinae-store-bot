@@ -1,0 +1,89 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "numinae-store"
+version = "0.1.0"
+description = "Telegram shop bot"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "python-telegram-bot[job-queue]==22.8",
+    "python-dotenv>=1.2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "pre-commit",
+]
+
+[tool.setuptools.packages.find]
+include = ["bot*"]
+
+[tool.setuptools.package-data]
+bot = ["schema.sql", "seed.json"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use bare asserts and obviously fake credentials.
+"tests/**" = ["S101", "S105", "S106"]
+# Customer-facing prose; the strings are single literals the formatter cannot wrap.
+"bot/i18n.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = false
+warn_unused_ignores = true
+files = ["bot", "tests"]
+
+[[tool.mypy.overrides]]
+module = [
+    "bot.repo.*",
+    "bot.security",
+    "bot.keyboards",
+    "bot.i18n",
+    "bot.render",
+    "bot.ratelimit",
+    "bot.owner_notify",
+]
+disallow_untyped_defs = true
+
+# Handlers, jobs and main are scheduled for rewrite/deletion in later refactor
+# phases; their Optional-narrowing errors (update.effective_user, callback_query,
+# etc.) need behavioural guards, so they are not fixed in the tooling phase.
+[[tool.mypy.overrides]]
+module = ["bot.handlers.*", "bot.jobs"]
+ignore_errors = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["bot"]
+branch = true
+# Code scheduled for deletion or rewrite in later refactor phases is not
+# measured: handlers, the reminder/expiry jobs, the entrypoint, and the
+# crypto payment-method repo.
+omit = [
+    "bot/handlers/*",
+    "bot/jobs.py",
+    "bot/main.py",
+    "bot/repo/payment_methods.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80

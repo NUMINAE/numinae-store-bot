@@ -1,0 +1,80 @@
+{
+  "settings": {
+    "welcome_text": "Welcome to Persian Tea Shop! Browse our catalogue of hand-selected teas and pay easily with crypto.",
+    "shipping_note": "Orders are typically dispatched within 2-3 business days after payment verification.",
+    "order_expiry_hours": "24",
+    "reminder_percents": "25,50,83",
+    "support_note": "Questions about your order? Message the shop owner directly and include your order number.",
+    "notify_new_customers": "1"
+  },
+  "categories": [
+    { "id": 1, "name": "Iranian Tea", "description": "Teas grown and blended in Iran.", "is_active": 1, "sort_order": 0 },
+    { "id": 2, "name": "Foreign Tea", "description": "Classic teas from around the world.", "is_active": 1, "sort_order": 1 },
+    { "id": 3, "name": "Indian Tea", "description": "Teas from India's tea gardens.", "is_active": 1, "sort_order": 2 }
+  ],
+  "products": [
+    { "id": 1, "category_id": 1, "name": "Persian Saffron Black Tea", "description": "Placeholder: premium black tea leaves infused with genuine Persian saffron threads.", "is_active": 1, "sort_order": 0 },
+    { "id": 2, "category_id": 1, "name": "Gilan Green Tea", "description": "Placeholder: light, grassy green tea grown in the tea gardens of Gilan province.", "is_active": 1, "sort_order": 1 },
+    { "id": 3, "category_id": 1, "name": "Bergamot Earl Grey Persian Style", "description": "Placeholder: classic Earl Grey reimagined with a Persian twist and natural bergamot oil.", "is_active": 1, "sort_order": 2 },
+    { "id": 4, "category_id": 2, "name": "English Breakfast Blend", "description": "Placeholder: a robust, malty black tea blend for the morning.", "is_active": 1, "sort_order": 0 },
+    { "id": 5, "category_id": 2, "name": "Moroccan Mint Green Tea", "description": "Placeholder: gunpowder green tea with fresh spearmint.", "is_active": 1, "sort_order": 1 },
+    { "id": 6, "category_id": 2, "name": "Ceylon Orange Pekoe", "description": "Placeholder: bright, brisk black tea from Sri Lanka's highlands.", "is_active": 1, "sort_order": 2 },
+    { "id": 7, "category_id": 3, "name": "Assam Black Tea", "description": "Placeholder: bold, malty black tea from the Assam valley.", "is_active": 1, "sort_order": 0 },
+    { "id": 8, "category_id": 3, "name": "Darjeeling First Flush", "description": "Placeholder: delicate, floral black tea from the Darjeeling hills.", "is_active": 1, "sort_order": 1 },
+    { "id": 9, "category_id": 3, "name": "Masala Chai Blend", "description": "Placeholder: black tea blended with warming spices.", "is_active": 1, "sort_order": 2 }
+  ],
+  "variants": [
+    { "product_id": 1, "label": "100g", "price_usd": 600,  "is_active": 1, "sort_order": 0 },
+    { "product_id": 1, "label": "250g", "price_usd": 1400, "is_active": 1, "sort_order": 1 },
+    { "product_id": 1, "label": "500g", "price_usd": 2600, "is_active": 1, "sort_order": 2 },
+
+    { "product_id": 2, "label": "100g", "price_usd": 500,  "is_active": 1, "sort_order": 0 },
+    { "product_id": 2, "label": "250g", "price_usd": 1200, "is_active": 1, "sort_order": 1 },
+    { "product_id": 2, "label": "500g", "price_usd": 2200, "is_active": 1, "sort_order": 2 },
+
+    { "product_id": 3, "label": "100g", "price_usd": 550,  "is_active": 1, "sort_order": 0 },
+    { "product_id": 3, "label": "250g", "price_usd": 1300, "is_active": 1, "sort_order": 1 },
+    { "product_id": 3, "label": "500g", "price_usd": 2400, "is_active": 1, "sort_order": 2 },
+
+    { "product_id": 4, "label": "100g", "price_usd": 500,  "is_active": 1, "sort_order": 0 },
+    { "product_id": 4, "label": "250g", "price_usd": 1100, "is_active": 1, "sort_order": 1 },
+    { "product_id": 4, "label": "500g", "price_usd": 2000, "is_active": 1, "sort_order": 2 },
+
+    { "product_id": 5, "label": "100g", "price_usd": 550,  "is_active": 1, "sort_order": 0 },
+    { "product_id": 5, "label": "250g", "price_usd": 1250, "is_active": 1, "sort_order": 1 },
+    { "product_id": 5, "label": "500g", "price_usd": 2300, "is_active": 1, "sort_order": 2 },
+
+    { "product_id": 6, "label": "100g", "price_usd": 450,  "is_active": 1, "sort_order": 0 },
+    { "product_id": 6, "label": "250g", "price_usd": 1050, "is_active": 1, "sort_order": 1 },
+    { "product_id": 6, "label": "500g", "price_usd": 1900, "is_active": 1, "sort_order": 2 },
+
+    { "product_id": 7, "label": "100g", "price_usd": 500,  "is_active": 1, "sort_order": 0 },
+    { "product_id": 7, "label": "250g", "price_usd": 1150, "is_active": 1, "sort_order": 1 },
+    { "product_id": 7, "label": "500g", "price_usd": 2100, "is_active": 1, "sort_order": 2 },
+
+    { "product_id": 8, "label": "100g", "price_usd": 900,  "is_active": 1, "sort_order": 0 },
+    { "product_id": 8, "label": "250g", "price_usd": 2000, "is_active": 1, "sort_order": 1 },
+    { "product_id": 8, "label": "500g", "price_usd": 3600, "is_active": 1, "sort_order": 2 },
+
+    { "product_id": 9, "label": "100g", "price_usd": 400,  "is_active": 1, "sort_order": 0 },
+    { "product_id": 9, "label": "250g", "price_usd": 900,  "is_active": 1, "sort_order": 1 },
+    { "product_id": 9, "label": "500g", "price_usd": 1600, "is_active": 1, "sort_order": 2 }
+  ],
+  "payment_methods": [
+    { "code": "BTC", "asset": "BTC", "asset_name": "Bitcoin", "network": "Bitcoin", "wallet_address": "", "memo_tag": null, "explorer_url": "https://mempool.space/tx/{tx}", "tx_hash_regex": "^[a-fA-F0-9]{64}$", "is_active": 0, "sort_order": 1 },
+    { "code": "LTC", "asset": "LTC", "asset_name": "Litecoin", "network": "Litecoin", "wallet_address": "", "memo_tag": null, "explorer_url": "https://blockchair.com/litecoin/transaction/{tx}", "tx_hash_regex": "^[a-fA-F0-9]{64}$", "is_active": 0, "sort_order": 2 },
+    { "code": "ETH", "asset": "ETH", "asset_name": "Ethereum", "network": "Ethereum (ERC-20)", "wallet_address": "", "memo_tag": null, "explorer_url": "https://etherscan.io/tx/{tx}", "tx_hash_regex": "^0x[a-fA-F0-9]{64}$", "is_active": 0, "sort_order": 3 },
+    { "code": "BNB", "asset": "BNB", "asset_name": "BNB", "network": "BNB Smart Chain", "wallet_address": "", "memo_tag": null, "explorer_url": "https://bscscan.com/tx/{tx}", "tx_hash_regex": "^0x[a-fA-F0-9]{64}$", "is_active": 0, "sort_order": 4 },
+    { "code": "SOL", "asset": "SOL", "asset_name": "Solana", "network": "Solana", "wallet_address": "", "memo_tag": null, "explorer_url": "https://solscan.io/tx/{tx}", "tx_hash_regex": "^[1-9A-HJ-NP-Za-km-z]{80,95}$", "is_active": 0, "sort_order": 5 },
+    { "code": "TRX", "asset": "TRX", "asset_name": "TRON", "network": "TRON (TRC-20)", "wallet_address": "", "memo_tag": null, "explorer_url": "https://tronscan.org/#/transaction/{tx}", "tx_hash_regex": "^[a-fA-F0-9]{64}$", "is_active": 0, "sort_order": 6 },
+    { "code": "TON", "asset": "TON", "asset_name": "Toncoin", "network": "TON", "wallet_address": "", "memo_tag": null, "explorer_url": "https://tonviewer.com/transaction/{tx}", "tx_hash_regex": null, "is_active": 0, "sort_order": 7 },
+    { "code": "USDT_TRC20", "asset": "USDT", "asset_name": "Tether", "network": "TRON (TRC-20)", "wallet_address": "", "memo_tag": null, "explorer_url": "https://tronscan.org/#/transaction/{tx}", "tx_hash_regex": "^[a-fA-F0-9]{64}$", "is_active": 0, "sort_order": 8 },
+    { "code": "USDT_ERC20", "asset": "USDT", "asset_name": "Tether", "network": "Ethereum (ERC-20)", "wallet_address": "", "memo_tag": null, "explorer_url": "https://etherscan.io/tx/{tx}", "tx_hash_regex": "^0x[a-fA-F0-9]{64}$", "is_active": 0, "sort_order": 9 },
+    { "code": "USDT_BEP20", "asset": "USDT", "asset_name": "Tether", "network": "BNB Smart Chain", "wallet_address": "", "memo_tag": null, "explorer_url": "https://bscscan.com/tx/{tx}", "tx_hash_regex": "^0x[a-fA-F0-9]{64}$", "is_active": 0, "sort_order": 10 },
+    { "code": "USDT_SOL", "asset": "USDT", "asset_name": "Tether", "network": "Solana", "wallet_address": "", "memo_tag": null, "explorer_url": "https://solscan.io/tx/{tx}", "tx_hash_regex": "^[1-9A-HJ-NP-Za-km-z]{80,95}$", "is_active": 0, "sort_order": 11 },
+    { "code": "USDT_TON", "asset": "USDT", "asset_name": "Tether", "network": "TON", "wallet_address": "", "memo_tag": null, "explorer_url": "https://tonviewer.com/transaction/{tx}", "tx_hash_regex": null, "is_active": 0, "sort_order": 12 },
+    { "code": "USDC_ERC20", "asset": "USDC", "asset_name": "USD Coin", "network": "Ethereum (ERC-20)", "wallet_address": "", "memo_tag": null, "explorer_url": "https://etherscan.io/tx/{tx}", "tx_hash_regex": "^0x[a-fA-F0-9]{64}$", "is_active": 0, "sort_order": 13 },
+    { "code": "USDC_SOL", "asset": "USDC", "asset_name": "USD Coin", "network": "Solana", "wallet_address": "", "memo_tag": null, "explorer_url": "https://solscan.io/tx/{tx}", "tx_hash_regex": "^[1-9A-HJ-NP-Za-km-z]{80,95}$", "is_active": 0, "sort_order": 14 },
+    { "code": "USDC_BEP20", "asset": "USDC", "asset_name": "USD Coin", "network": "BNB Smart Chain", "wallet_address": "", "memo_tag": null, "explorer_url": "https://bscscan.com/tx/{tx}", "tx_hash_regex": "^0x[a-fA-F0-9]{64}$", "is_active": 0, "sort_order": 15 }
+  ]
+}

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "python-telegram-bot[job-queue]==22.8",
-    "python-dotenv>=1.2.2",
+    "pydantic-settings>=2.2",
 ]
 
 [project.optional-dependencies]
@@ -27,7 +27,7 @@ dev = [
 include = ["bot*"]
 
 [tool.setuptools.package-data]
-bot = ["schema.sql", "seed.json"]
+bot = ["migrations/*.sql", "seed_demo.json"]
 
 [tool.ruff]
 line-length = 100
@@ -60,13 +60,6 @@ module = [
 ]
 disallow_untyped_defs = true
 
-# Handlers, jobs and main are scheduled for rewrite/deletion in later refactor
-# phases; their Optional-narrowing errors (update.effective_user, callback_query,
-# etc.) need behavioural guards, so they are not fixed in the tooling phase.
-[[tool.mypy.overrides]]
-module = ["bot.handlers.*", "bot.jobs"]
-ignore_errors = true
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
@@ -74,16 +67,10 @@ testpaths = ["tests"]
 [tool.coverage.run]
 source = ["bot"]
 branch = true
-# Code scheduled for deletion or rewrite in later refactor phases is not
-# measured: handlers, the reminder/expiry jobs, the entrypoint, and the
-# crypto payment-method repo.
-omit = [
-    "bot/handlers/*",
-    "bot/jobs.py",
-    "bot/main.py",
-    "bot/repo/payment_methods.py",
-]
+# The entrypoint wires handlers to Telegram and is not unit tested.
+omit = ["bot/main.py"]
 
+# Thresholds differ by area, so they are enforced by two `coverage report`
+# runs (see CI and the README): 80% outside bot/handlers, 60% inside it.
 [tool.coverage.report]
 show_missing = true
-fail_under = 80

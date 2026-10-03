@@ -1,10 +1,10 @@
-"""Shared fixtures. The environment must be set before anything imports
-bot.config, which validates it at import time (and would otherwise pick up a
-developer's real .env)."""
+"""Shared fixtures. The environment must be set before anything reads
+settings, and the settings cache is cleared around every database fixture so
+a test's DB_PATH / SEED_DEMO never leaks into the next one (and a developer's
+real .env never overrides them: real environment variables win over .env)."""
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 import os
 from collections.abc import Iterator
@@ -18,19 +18,37 @@ os.environ["BOT_TOKEN"] = "test-token-not-real"
 os.environ["OWNER_ID"] = str(OWNER_ID)
 os.environ["LOG_LEVEL"] = "WARNING"
 
-from bot import db as db_module  # noqa: E402
-from bot import ratelimit  # noqa: E402
+from bot import db as db_module  # noqa: E402 - env vars must be set before bot is imported
+from bot import ratelimit  # noqa: E402 - env vars must be set before bot is imported
+from bot.config import get_settings  # noqa: E402 - env vars must be set before bot is imported
+from bot.seed_demo import seed_demo  # noqa: E402 - env vars must be set before bot is imported
+
+
+def _open_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, demo: bool) -> Any:
+    db_module.close_conn()
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("SEED_DEMO", "true" if demo else "false")
+    get_settings.cache_clear()
+    db_module.init_db()
+    seed_demo()
+    return db_module.get_conn()
 
 
 @pytest.fixture
 def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
-    """A fresh, seeded temporary database behind the module-level connection."""
+    """A fresh temporary database with the demo catalogue behind the
+    module-level connection."""
+    yield _open_db(tmp_path, monkeypatch, demo=True)
     db_module.close_conn()
-    config = dataclasses.replace(db_module.CONFIG, db_path=str(tmp_path / "test.db"))
-    monkeypatch.setattr(db_module, "CONFIG", config)
-    db_module.init_db()
-    yield db_module.get_conn()
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def empty_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+    """Migrated but unseeded: only the settings defaults from migration 0001."""
+    yield _open_db(tmp_path, monkeypatch, demo=False)
     db_module.close_conn()
+    get_settings.cache_clear()
 
 
 @pytest.fixture

@@ -1,0 +1,78 @@
+{
+  "categories": [
+    {
+      "name": "AI Creator Assets",
+      "description": "Fictional demo assets for AI artists and storytellers.",
+      "products": [
+        {
+          "name": "Neon Portrait Prompt Pack",
+          "description": "Demo product: 60 fictional prompts for neon-lit portraits.",
+          "variants": [
+            { "label": "Personal", "price_stars": 75, "delivery_kind": "text", "delivery_text": "Demo delivery: https://example.com/demo/neon-prompts-personal" },
+            { "label": "Commercial", "price_stars": 250, "delivery_kind": "text", "delivery_text": "Demo delivery: https://example.com/demo/neon-prompts-commercial" }
+          ]
+        },
+        {
+          "name": "Cinematic Style Starter Set",
+          "description": "Demo product: fictional style presets for cinematic frames.",
+          "variants": [
+            { "label": "Personal", "price_stars": 120, "delivery_kind": "text", "delivery_text": "Demo delivery: https://example.com/demo/cinematic-personal" },
+            { "label": "Commercial", "price_stars": 400, "delivery_kind": "text", "delivery_text": "Demo delivery: https://example.com/demo/cinematic-commercial" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Developer & Design Tools",
+      "description": "Fictional demo templates, kits and licences for builders.",
+      "products": [
+        {
+          "name": "Pixel UI Kit",
+          "description": "Demo product: a fictional set of retro interface components.",
+          "variants": [
+            { "label": "Personal", "price_stars": 90, "delivery_kind": "text", "delivery_text": "Demo delivery: https://example.com/demo/pixel-ui-personal" },
+            { "label": "Commercial", "price_stars": 300, "delivery_kind": "text", "delivery_text": "Demo delivery: https://example.com/demo/pixel-ui-commercial" }
+          ]
+        },
+        {
+          "name": "Orbit Icons Pro",
+          "description": "Demo product: a fictional icon library, delivered as a licence key.",
+          "variants": [
+            { "label": "Personal", "price_stars": 50, "delivery_kind": "key", "key_prefix": "ORBP", "key_count": 10 },
+            { "label": "Commercial", "price_stars": 200, "delivery_kind": "key", "key_prefix": "ORBC", "key_count": 10 }
+          ]
+        },
+        {
+          "name": "Pocket Linter Licence",
+          "description": "Demo product: a fictional linter licence. The Team edition has no keys in stock, so customers never see it.",
+          "variants": [
+            { "label": "Personal", "price_stars": 150, "delivery_kind": "key", "key_prefix": "PLNP", "key_count": 10 },
+            { "label": "Team", "price_stars": 600, "delivery_kind": "key", "key_prefix": "PLNT", "key_count": 0 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Guides & E-books",
+      "description": "Fictional demo reading for creators and developers.",
+      "products": [
+        {
+          "name": "The Prompt Craft Handbook",
+          "description": "Demo product: a fictional e-book on writing better prompts.",
+          "variants": [
+            { "label": "Personal", "price_stars": 50, "delivery_kind": "text", "delivery_text": "Demo delivery: https://example.com/demo/prompt-craft-personal" },
+            { "label": "Commercial", "price_stars": 150, "delivery_kind": "text", "delivery_text": "Demo delivery: https://example.com/demo/prompt-craft-commercial" }
+          ]
+        },
+        {
+          "name": "Shipping Your First Bot",
+          "description": "Demo product: a fictional guide to launching a Telegram bot.",
+          "variants": [
+            { "label": "Personal", "price_stars": 80, "delivery_kind": "text", "delivery_text": "Demo delivery: https://example.com/demo/first-bot-personal" },
+            { "label": "Commercial", "price_stars": 220, "delivery_kind": "text", "delivery_text": "Demo delivery: https://example.com/demo/first-bot-commercial" }
+          ]
+        }
+      ]
+    }
+  ]
+}

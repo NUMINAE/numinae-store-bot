@@ -13,6 +13,7 @@ from collections.abc import Container
 from telegram import ReplyKeyboardMarkup
 
 CALLBACK_DATA_MAX_BYTES = 64
+MAX_ROW_ID = 2**63 - 1  # largest SQLite INTEGER
 
 # Persistent reply-keyboard labels for top-level customer navigation, one
 # triple per language. Matched by exact string in handlers/router.py — never
@@ -22,17 +23,17 @@ CALLBACK_DATA_MAX_BYTES = 64
 # below maps every label in every language to the same action, so router.py
 # matches against the full set of six, not just the current language.
 MENU_LABELS: dict[str, tuple[str, str, str]] = {
-    "en": ("Browse Products", "Shopping Cart", "My Orders"),
-    "ru": ("Просмотр товаров", "Корзина", "Мои заказы"),
+    "en": ("Browse Products", "Shopping Cart", "My Library"),
+    "ru": ("Просмотр товаров", "Корзина", "Моя библиотека"),
 }
 
 MENU_ACTION_BY_LABEL: dict[str, str] = {}
 for _labels in MENU_LABELS.values():
-    _browse, _cart, _orders = _labels
+    _browse, _cart, _library = _labels
     MENU_ACTION_BY_LABEL[_browse] = "browse"
     MENU_ACTION_BY_LABEL[_cart] = "cart"
-    MENU_ACTION_BY_LABEL[_orders] = "orders"
-del _labels, _browse, _cart, _orders
+    MENU_ACTION_BY_LABEL[_library] = "library"
+del _labels, _browse, _cart, _library
 
 
 def main_reply_keyboard(lang: str) -> ReplyKeyboardMarkup:
@@ -44,7 +45,7 @@ def main_reply_keyboard(lang: str) -> ReplyKeyboardMarkup:
     )
 
 
-def cb(*parts: str) -> str:
+def cb(*parts: str | int) -> str:
     data = ":".join(str(p) for p in parts)
     encoded_len = len(data.encode("utf-8"))
     if encoded_len > CALLBACK_DATA_MAX_BYTES:
@@ -73,10 +74,11 @@ def parse_callback(data: str, expected_parts: int | Container[int]) -> list[str]
 
 def parse_cb_id(value: str) -> int | None:
     """Safely parse a callback_data segment expected to be a non-negative
-    row id. Returns None — never raises — on non-numeric input or a
-    negative value."""
+    row id. Returns None — never raises — on non-numeric input, a negative
+    value, or one too large for SQLite's 64-bit INTEGER (which would raise
+    OverflowError at query time)."""
     try:
         n = int(value)
     except (TypeError, ValueError):
         return None
-    return n if n >= 0 else None
+    return n if 0 <= n <= MAX_ROW_ID else None

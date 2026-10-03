@@ -13,10 +13,9 @@ def esc(value: Any) -> str:
     return html.escape(str(value))
 
 
-def usd(cents: int) -> str:
-    sign = "-" if cents < 0 else ""
-    cents = abs(cents)
-    return f"{sign}${cents // 100}.{cents % 100:02d}"
+def stars(amount: int) -> str:
+    """Money is whole Telegram Stars; this is the only place it is formatted."""
+    return f"⭐ {amount}"
 
 
 def code(value: Any) -> str:

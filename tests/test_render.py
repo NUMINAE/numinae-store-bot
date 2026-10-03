@@ -39,15 +39,12 @@ def test_formatters_do_not_double_escape_or_leak_raw_markup(func):
 
 
 @pytest.mark.parametrize(
-    ("cents", "expected"),
-    [
-        (0, "$0.00"),
-        (5, "$0.05"),
-        (100, "$1.00"),
-        (1234, "$12.34"),
-        (-150, "-$1.50"),
-        (-5, "-$0.05"),
-    ],
+    ("amount", "expected"),
+    [(1, "⭐ 1"), (75, "⭐ 75"), (100000, "⭐ 100000")],
 )
-def test_usd(cents, expected):
-    assert render.usd(cents) == expected
+def test_stars(amount, expected):
+    assert render.stars(amount) == expected
+
+
+def test_usd_is_gone():
+    assert not hasattr(render, "usd")

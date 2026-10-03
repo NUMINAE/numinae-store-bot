@@ -2,83 +2,99 @@
 common prompt/reprompt/cancel-button UI, plus small status-label helpers.
 
 Kept in its own module — rather than living in admin_catalogue.py — so
-admin_catalogue.py and admin_orders.py can both use it without importing
+admin_catalogue.py and admin_settings.py can both use it without importing
 each other.
 """
 
 from __future__ import annotations
 
 import re
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from dataclasses import dataclass
+from typing import Generic, TypeVar
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.ext import ContextTypes
 
 from ..keyboards import cb
-from ..render import usd
+from ..render import stars
+from ..tg import require_message
 from ..ui import show_screen
 
-MAX_PRICE_CENTS = 1_000_000  # $10,000.00
-_PRICE_RE = re.compile(r"^\$?\s*(\d+(?:\.\d{1,2})?)\s*$")
+T = TypeVar("T")
 
 
-def validate_name(text: str) -> tuple[bool, str | None, str]:
+@dataclass(frozen=True)
+class Valid(Generic[T]):
+    """A typed-input value that passed validation, plus a short human preview."""
+
+    value: T
+    preview: str
+
+
+@dataclass(frozen=True)
+class Invalid:
+    message: str
+
+
+MAX_PRICE_STARS = 100_000
+MAX_DELIVERY_TEXT_LEN = 2000
+_PRICE_RE = re.compile(r"^(?:⭐\ufe0f?\s*)?(\d{1,12})$")
+_PRICE_HELP = "Send a whole number of Stars, e.g. 75 or ⭐75."
+
+
+def validate_name(text: str) -> Valid[str] | Invalid:
     cleaned = text.strip()
     if not cleaned or len(cleaned) > 60:
-        return False, None, "Please send a name between 1 and 60 characters."
-    return True, cleaned, cleaned
+        return Invalid("Please send a name between 1 and 60 characters.")
+    return Valid(cleaned, cleaned)
 
 
-def validate_description(text: str) -> tuple[bool, str | None, str]:
+def validate_description(text: str) -> Valid[str] | Invalid:
     cleaned = text.strip()
     if cleaned == "-":
-        return True, "", "(cleared)"
+        return Valid("", "(cleared)")
     if len(cleaned) > 500:
-        return False, None, "Descriptions must be 500 characters or fewer. Please retype."
-    return True, cleaned, cleaned if cleaned else "(empty)"
+        return Invalid("Descriptions must be 500 characters or fewer. Please retype.")
+    return Valid(cleaned, cleaned if cleaned else "(empty)")
 
 
-def validate_price(text: str) -> tuple[bool, int | None, str]:
-    cleaned = text.strip()
-    match = _PRICE_RE.match(cleaned)
+def validate_price(text: str) -> Valid[int] | Invalid:
+    """Whole Telegram Stars only: "75" or "⭐75". Decimals, zero, negatives and
+    anything over MAX_PRICE_STARS are rejected."""
+    match = _PRICE_RE.match(text.strip())
     if not match:
-        return (
-            False,
-            None,
-            "That doesn't look like a price. Send something like 14, 14.50, or $14.50.",
-        )
-    try:
-        dollars = Decimal(match.group(1))
-    except InvalidOperation:
-        return (
-            False,
-            None,
-            "That doesn't look like a price. Send something like 14, 14.50, or $14.50.",
-        )
-    cents = int((dollars * 100).to_integral_value(rounding=ROUND_HALF_UP))
-    if cents <= 0:
-        return False, None, "Price must be greater than $0."
-    if cents > MAX_PRICE_CENTS:
-        return False, None, "Price must be $10,000 or less."
-    return True, cents, usd(cents)
+        return Invalid(f"That doesn't look like a price. {_PRICE_HELP}")
+    amount = int(match.group(1))
+    if amount <= 0:
+        return Invalid("Price must be at least ⭐1.")
+    if amount > MAX_PRICE_STARS:
+        return Invalid(f"Price must be {stars(MAX_PRICE_STARS)} or less.")
+    return Valid(amount, stars(amount))
 
 
-def validate_sort_order(text: str) -> tuple[bool, int | None, str]:
+def validate_delivery_text(text: str) -> Valid[str] | Invalid:
+    """Stored raw (escaped only when rendered); 1–2000 characters."""
+    if not text.strip() or len(text) > MAX_DELIVERY_TEXT_LEN:
+        return Invalid(f"Please send between 1 and {MAX_DELIVERY_TEXT_LEN} characters.")
+    return Valid(text, "saved")
+
+
+def validate_sort_order(text: str) -> Valid[int] | Invalid:
     cleaned = text.strip()
     try:
         value = int(cleaned)
     except ValueError:
-        return False, None, "Please send a whole number between 0 and 999."
+        return Invalid("Please send a whole number between 0 and 999.")
     if not (0 <= value <= 999):
-        return False, None, "Please send a whole number between 0 and 999."
-    return True, value, str(value)
+        return Invalid("Please send a whole number between 0 and 999.")
+    return Valid(value, str(value))
 
 
-def validate_short_text(text: str, min_len: int, max_len: int) -> tuple[bool, str | None, str]:
+def validate_short_text(text: str, min_len: int, max_len: int) -> Valid[str] | Invalid:
     cleaned = text.strip()
     if not (min_len <= len(cleaned) <= max_len):
-        return False, None, f"Please send between {min_len} and {max_len} characters."
-    return True, cleaned, cleaned
+        return Invalid(f"Please send between {min_len} and {max_len} characters.")
+    return Valid(cleaned, cleaned)
 
 
 def cancel_button() -> InlineKeyboardButton:
@@ -92,8 +108,11 @@ async def prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) 
     # place that needs to hide the customer reply keyboard while the owner
     # types — the prompt above already used its reply_markup slot for the
     # Cancel button, whether it edited or sent fresh.
+    chat = update.effective_chat
+    if chat is None:
+        return
     await context.bot.send_message(
-        chat_id=update.effective_chat.id, text="Type below.", reply_markup=ReplyKeyboardRemove()
+        chat_id=chat.id, text="Type below.", reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -102,7 +121,7 @@ async def reprompt_after_invalid(
 ) -> None:
     """Validation failed: keep the pending row, explain, let them retype."""
     keyboard = InlineKeyboardMarkup([[cancel_button()]])
-    await update.message.reply_text(error, reply_markup=keyboard)
+    await require_message(update).reply_text(error, reply_markup=keyboard)
 
 
 def status_word(is_active) -> str:

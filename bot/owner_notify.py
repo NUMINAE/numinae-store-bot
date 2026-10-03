@@ -21,7 +21,7 @@ import logging
 from telegram import User
 from telegram.ext import ContextTypes
 
-from .config import CONFIG
+from .config import get_settings
 from .render import bold, code, esc
 from .repo import customers as customers_repo
 from .repo import settings as settings_repo
@@ -73,7 +73,7 @@ async def _send_individual(context: ContextTypes.DEFAULT_TYPE, user: User) -> No
     lines.append(f"customer #{customers_repo.count_all()}")
     text = "\n".join(lines)
     try:
-        await context.bot.send_message(CONFIG.owner_id, text)
+        await context.bot.send_message(get_settings().owner_id, text)
     except Exception:
         logger.error(
             "Failed to send new-customer notification for user #%s", user.id, exc_info=True
@@ -93,6 +93,6 @@ async def _rollup_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     noun = "customer" if suppressed == 1 else "customers"
     text = f"{suppressed} more new {noun} in the last hour"
     try:
-        await context.bot.send_message(CONFIG.owner_id, text)
+        await context.bot.send_message(get_settings().owner_id, text)
     except Exception:
         logger.error("Failed to send new-customer rollup notification", exc_info=True)

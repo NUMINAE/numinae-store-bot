@@ -5,23 +5,23 @@ from __future__ import annotations
 import sqlite3
 
 from ..db import get_conn, transaction
+from .products import purchasable_sql
 
 
 def list_active() -> list[sqlite3.Row]:
-    """Active categories that contain at least one purchasable variant, so a
+    """Active categories that contain at least one purchasable edition, so a
     customer never opens an empty category."""
     conn = get_conn()
     return conn.execute(
-        """
+        f"""
         SELECT * FROM categories c
-        WHERE c.is_active = 1
-          AND EXISTS (
+        WHERE EXISTS (
             SELECT 1 FROM products p
-            JOIN product_variants v ON v.product_id = p.id AND v.is_active = 1
-            WHERE p.category_id = c.id AND p.is_active = 1
-          )
+            JOIN product_variants v ON v.product_id = p.id
+            WHERE p.category_id = c.id AND {purchasable_sql()}
+        )
         ORDER BY c.sort_order, c.id
-        """
+        """  # noqa: S608 - purchasable_sql() returns a fixed constant fragment, no user input
     ).fetchall()
 
 
@@ -44,7 +44,8 @@ def create(name: str) -> int:
             "SELECT COALESCE(MAX(sort_order), -10) + 10 AS n FROM categories"
         ).fetchone()["n"]
         cur = conn.execute(
-            "INSERT INTO categories (name, description, is_active, sort_order) VALUES (?, '', 1, ?)",  # noqa: E501
+            "INSERT INTO categories (name, description, is_active, sort_order)"
+            " VALUES (?, '', 1, ?)",
             (name, next_sort),
         )
         return cur.lastrowid  # type: ignore[return-value]  # lastrowid is always set after an INSERT
@@ -103,16 +104,17 @@ def count_products(category_id: int) -> int:
 
 
 def count_purchasable_variants(category_id: int) -> int:
-    """Active variants belonging to active products in this category — what's
-    actually purchasable right now, for the deactivation blast-radius message."""
+    """Editions purchasable right now in this category, for the deactivation
+    blast-radius message."""
     conn = get_conn()
     row = conn.execute(
-        """
+        f"""
         SELECT COUNT(*) AS c
         FROM product_variants v
         JOIN products p ON p.id = v.product_id
-        WHERE p.category_id = ? AND p.is_active = 1 AND v.is_active = 1
-        """,
+        JOIN categories c ON c.id = p.category_id
+        WHERE p.category_id = ? AND {purchasable_sql()}
+        """,  # noqa: S608 - purchasable_sql() returns a fixed constant fragment, no user input
         (category_id,),
     ).fetchone()
-    return row["c"]
+    return int(row["c"])

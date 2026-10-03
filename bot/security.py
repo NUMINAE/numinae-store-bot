@@ -1,6 +1,6 @@
 """owner_only decorator for command and callback handlers.
 
-Register admin handlers with filters.User(CONFIG.owner_id) as well — this
+Register admin handlers with filters.User(get_settings().owner_id) as well — this
 decorator is a second line of defense, not the only one.
 """
 
@@ -15,7 +15,7 @@ from typing import Any
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from .config import CONFIG
+from .config import get_settings
 from .repo import orders as orders_repo
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ def owner_only(func: HandlerFunc) -> HandlerFunc:
         user = update.effective_user
         user_id = user.id if user else None
 
-        if user_id != CONFIG.owner_id:
+        if user_id != get_settings().owner_id:
             logger.warning("Refused owner-only action to user_id=%s", user_id)
             if update.callback_query:
                 await update.callback_query.answer(

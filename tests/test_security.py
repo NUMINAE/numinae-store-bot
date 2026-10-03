@@ -25,10 +25,9 @@ UNAVAILABLE = "That order is no longer available."
 def order_id(db):
     add_customer(OWNER_OF_ORDER)
     add_customer(STRANGER)
-    db.execute("UPDATE payment_methods SET is_active = 1, wallet_address = 'w' WHERE code = 'BTC'")
     cur = db.execute(
-        "INSERT INTO orders (user_id, total_usd, item_count, payment_method, wallet_address,"
-        " status) VALUES (?, 600, 1, 'BTC', 'w', 'awaiting_payment')",
+        "INSERT INTO orders (user_id, total_stars, item_count, payment_mode, status)"
+        " VALUES (?, 75, 1, 'mock', 'pending_payment')",
         (OWNER_OF_ORDER,),
     )
     db.commit()

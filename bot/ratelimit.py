@@ -19,7 +19,7 @@ from collections import deque
 from telegram import Update
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
-from .config import CONFIG
+from .config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ async def throttle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     global _calls_since_gc
 
     user = update.effective_user
-    if user is None or user.id == CONFIG.owner_id:
+    if user is None or user.id == get_settings().owner_id:
         return
 
     user_id = user.id

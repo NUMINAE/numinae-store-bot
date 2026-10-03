@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
+
+import pytest
+
 from bot.repo import admin_pending as admin_pending_repo
 from bot.repo import categories as categories_repo
 from bot.repo import customers as customers_repo
@@ -32,12 +36,11 @@ def test_category_updates(db):
 
 
 def test_category_counts(db):
-    assert categories_repo.count_products(1) == 3
-    assert categories_repo.count_purchasable_variants(1) > 0
+    assert categories_repo.count_products(1) == 2
+    assert categories_repo.count_purchasable_variants(1) == 4
     products_repo.set_active(1, False)
-    assert categories_repo.count_products(1) == 3  # inactive still counted
-    after = categories_repo.count_purchasable_variants(1)
-    assert after < 9
+    assert categories_repo.count_products(1) == 2  # inactive still counted
+    assert categories_repo.count_purchasable_variants(1) == 2
 
 
 def test_category_get_missing_is_none(db):
@@ -48,9 +51,9 @@ def test_category_get_missing_is_none(db):
 
 
 def test_product_create_and_updates(db):
-    new_id = products_repo.create(1, "Fresh Tea")
+    new_id = products_repo.create(1, "Fresh Asset")
     row = products_repo.get(new_id)
-    assert (row["category_id"], row["name"], row["is_active"]) == (1, "Fresh Tea", 1)
+    assert (row["category_id"], row["name"], row["is_active"]) == (1, "Fresh Asset", 1)
     products_repo.update_name(new_id, "Fresher")
     products_repo.update_description(new_id, "d")
     products_repo.update_sort_order(new_id, 5)
@@ -65,20 +68,22 @@ def test_product_create_and_updates(db):
 
 
 def test_product_counts_and_pagination(db):
-    assert products_repo.count_all() == 9
-    assert products_repo.count_all_in_category(1) == 3
-    assert products_repo.count_variants(1) == 3
-    assert products_repo.count_active_variants(1) == 3
-    variants_repo.set_active(1, False)
-    assert products_repo.count_variants(1) == 3
-    assert products_repo.count_active_variants(1) == 2
-    page1 = products_repo.list_all_in_category(1, 2, 0)
-    page2 = products_repo.list_all_in_category(1, 2, 2)
-    assert [p["id"] for p in page1 + page2] == [1, 2, 3]
-    assert len(products_repo.list_active_in_category(1, 2, 2)) == 1
+    assert products_repo.count_all() == 7
+    assert products_repo.count_all_in_category(2) == 3
+    assert products_repo.count_variants(3) == 2
+    assert products_repo.count_active_variants(3) == 2
+    assert products_repo.count_purchasable_variants(3) == 2
+    variants_repo.set_active(5, False)
+    assert products_repo.count_variants(3) == 2
+    assert products_repo.count_active_variants(3) == 1
+    assert products_repo.count_purchasable_variants(3) == 1
+    page1 = products_repo.list_all_in_category(2, 2, 0)
+    page2 = products_repo.list_all_in_category(2, 2, 2)
+    assert [p["id"] for p in page1 + page2] == [3, 4, 5]
+    assert len(products_repo.list_active_in_category(2, 2, 2)) == 1
 
 
-def test_list_variants_only_returns_active_ones(db):
+def test_list_variants_only_returns_purchasable_ones(db):
     variants_repo.set_active(1, False)
     assert 1 not in [v["id"] for v in products_repo.list_variants(1)]
     assert 1 in [v["id"] for v in variants_repo.list_all_for_product(1)]
@@ -86,8 +91,9 @@ def test_list_variants_only_returns_active_ones(db):
 
 def test_get_variant_joins_parents(db):
     row = products_repo.get_variant(1)
-    assert row["product_name"] == "Persian Saffron Black Tea"
-    assert row["category_name"] == "Iranian Tea"
+    assert row["product_name"] == "Neon Portrait Prompt Pack"
+    assert row["category_name"] == "AI Creator Assets"
+    assert row["price_stars"] == 75
     assert products_repo.get_variant(9999) is None
 
 
@@ -95,15 +101,36 @@ def test_get_variant_joins_parents(db):
 
 
 def test_variant_create_and_updates(db):
-    new_id = variants_repo.create(1, "1kg", 2500)
+    new_id = variants_repo.create(1, "Team", 500, "key")
     row = variants_repo.get(new_id)
-    assert (row["label"], row["price_usd"], row["is_active"]) == ("1kg", 2500, 1)
-    variants_repo.update_label(new_id, "2kg")
-    variants_repo.update_price(new_id, 4000)
-    variants_repo.update_sort_order(new_id, 7)
+    assert (row["label"], row["price_stars"], row["delivery_kind"], row["is_active"]) == (
+        "Team",
+        500,
+        "key",
+        1,
+    )
+    variants_repo.update_label(new_id, "Studio")
+    variants_repo.update_price(new_id, 400)
+    variants_repo.update_sort_order(new_id, 99)
     row = variants_repo.get(new_id)
-    assert (row["label"], row["price_usd"], row["sort_order"]) == ("2kg", 4000, 7)
+    assert (row["label"], row["price_stars"], row["sort_order"]) == ("Studio", 400, 99)
     assert variants_repo.list_all_for_product(1)[-1]["id"] == new_id
+
+
+def test_variant_delivery_text_is_stored_raw(db):
+    variants_repo.set_delivery_text(1, "<b>&")
+    assert variants_repo.get(1)["delivery_text"] == "<b>&"
+
+
+def test_variant_delivery_kind_is_validated_and_fixed(db):
+    with pytest.raises(ValueError, match="delivery kind"):
+        variants_repo.create(1, "X", 10, "carrier-pigeon")
+    assert not hasattr(variants_repo, "update_delivery_kind")
+
+
+def test_variant_price_must_be_positive(db):
+    with pytest.raises(sqlite3.IntegrityError):
+        variants_repo.create(1, "Free", 0, "text")
 
 
 def test_variant_get_missing_is_none(db):

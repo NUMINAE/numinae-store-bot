@@ -1,6 +1,6 @@
-"""/start, the main menu, the "My orders" / "Help" placeholders, the shared
-"menu:show" callback, and the catch-all unknown-callback fallback. Customer
-and admin order flows are built in later phases."""
+"""/start, the main menu, the temporary "My Library" screen and the "Help"
+screen, the shared "menu:show" callback, and the catch-all unknown-callback
+fallback."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from ..keyboards import cb, main_reply_keyboard
 from ..render import esc
 from ..repo import cart, customers
 from ..repo import settings as settings_repo
+from ..tg import require_data, require_message, require_query, require_user
 from ..ui import show_screen
 
 logger = logging.getLogger(__name__)
@@ -51,13 +52,13 @@ def render_main_menu(user_id: int, lang: str) -> tuple[str, InlineKeyboardMarkup
         [
             [
                 InlineKeyboardButton(
-                    t("common.browse_teas_button", lang), callback_data=cb("cat", "cats")
+                    t("common.browse_button", lang), callback_data=cb("cat", "cats")
                 )
             ],
             [InlineKeyboardButton(cart_label, callback_data=cb("cart", "view"))],
             [
                 InlineKeyboardButton(
-                    t("common.my_orders_button", lang), callback_data=cb("ord", "list", 0)
+                    t("common.my_library_button", lang), callback_data=cb("lib", "show")
                 )
             ],
             [InlineKeyboardButton(t("common.help_button", lang), callback_data=cb("help", "show"))],
@@ -68,9 +69,9 @@ def render_main_menu(user_id: int, lang: str) -> tuple[str, InlineKeyboardMarkup
             ],
         ]
     )
-    # welcome_text is a single string the owner types — not per-language (see
-    # Part B's "what is NOT translated"). Only the built-in default falls
-    # back to a translated string; a configured value renders as typed.
+    # welcome_text is a single string the owner types — not per-language.
+    # Only the built-in default falls back to a translated string; a
+    # configured value renders as typed.
     welcome = settings_repo.get("welcome_text")
     text = esc(welcome) if welcome else t("common.welcome_default", lang)
     return text, keyboard
@@ -98,23 +99,30 @@ async def show_language_picker(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> None:
-    user_id = update.effective_user.id
+    user_id = require_user(update).id
     customers.set_language(user_id, lang)
     text, keyboard = render_main_menu(user_id, lang)
     await show_screen(update, context, text=text, keyboard=keyboard)
-    # Re-send the reply keyboard immediately so it updates too, per Part B.
+    # Re-send the reply keyboard immediately so it updates too.
     await context.bot.send_message(
-        chat_id=update.effective_chat.id,
+        chat_id=_chat_id(update),
         text=t("common.reply_keyboard_intro", lang),
         reply_markup=main_reply_keyboard(lang),
     )
 
 
+def _chat_id(update: Update) -> int:
+    """The chat to send a standalone message to: the effective chat, else the
+    user's private chat (same id)."""
+    chat = update.effective_chat
+    return chat.id if chat is not None else require_user(update).id
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.effective_user:
-        return
+    message = require_message(update)
+    user = require_user(update)
     is_new_customer = touch_customer(update)
-    user_id = update.effective_user.id
+    user_id = user.id
 
     if is_new_customer:
         # Nothing else — not even the welcome text — until they've picked a
@@ -122,23 +130,43 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await show_language_picker(update, context)
         # After the customer's own reply, never before — a slow or failing
         # owner notification must not delay what they see.
-        await owner_notify.notify_new_customer(context, update.effective_user)
+        await owner_notify.notify_new_customer(context, user)
         return
 
     lang = get_lang(user_id)
     text, keyboard = render_main_menu(user_id, lang)
-    await update.message.reply_text(text, reply_markup=keyboard)
+    await message.reply_text(text, reply_markup=keyboard)
     # A message can only carry one reply_markup — the inline main menu above
     # used that slot, so the persistent reply keyboard needs its own message.
-    await update.message.reply_text(
+    await message.reply_text(
         t("common.reply_keyboard_intro", lang),
         reply_markup=main_reply_keyboard(lang),
     )
 
 
+async def show_library_stub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Temporary until the customer library exists (R2)."""
+    lang = get_lang(require_user(update).id)
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("common.back_to_menu_button", lang), callback_data=cb("menu", "show")
+                )
+            ]
+        ]
+    )
+    await show_screen(update, context, text=t("library.stub", lang), keyboard=keyboard)
+
+
+async def library_route(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    touch_customer(update)
+    await show_library_stub(update, context)
+
+
 async def menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     touch_customer(update)
-    user_id = update.effective_user.id
+    user_id = require_user(update).id
     lang = get_lang(user_id)
     text, keyboard = render_main_menu(user_id, lang)
     await show_screen(update, context, text=text, keyboard=keyboard)
@@ -147,8 +175,8 @@ async def menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def lang_route(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from ..keyboards import parse_callback
 
-    query = update.callback_query
-    parts = parse_callback(query.data, (2, 3))
+    query = require_query(update)
+    parts = parse_callback(require_data(query), (2, 3))
     if parts is None:
         await query.answer(t("common.expired_menu", DEFAULT_LANGUAGE), show_alert=True)
         return
@@ -167,7 +195,7 @@ async def lang_route(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def help_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     touch_customer(update)
-    lang = get_lang(update.effective_user.id)
+    lang = get_lang(require_user(update).id)
     text = t("common.help_text", lang)
     keyboard = InlineKeyboardMarkup(
         [
@@ -182,13 +210,12 @@ async def help_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def unknown_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    if not query:
-        return
+    query = require_query(update)
     if query.data == "noop":
         await query.answer()
         return
-    user_id = update.effective_user.id if update.effective_user else None
+    user = update.effective_user
+    user_id = user.id if user else None
     logger.info("Unrecognized callback_data=%r from user_id=%s", query.data, user_id)
     lang = get_lang(user_id) if user_id else DEFAULT_LANGUAGE
     await query.answer(t("common.expired_menu", lang), show_alert=True)
@@ -201,4 +228,6 @@ async def unknown_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 InlineKeyboardMarkup([]),
             )
         )
-        await query.message.reply_text(text, reply_markup=keyboard)
+        await context.bot.send_message(
+            chat_id=query.message.chat.id, text=text, reply_markup=keyboard
+        )

@@ -4,6 +4,7 @@ and polling. Run as `python -m bot.main` from the project root."""
 from __future__ import annotations
 
 import logging
+import sys
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -18,15 +19,16 @@ from telegram.ext import (
     filters,
 )
 
-from . import jobs, ratelimit
-from .config import CONFIG
-from .db import init_db
-from .handlers import admin_catalogue, admin_orders, catalogue, checkout, router, shipping
+from . import ratelimit
+from .config import get_settings
+from .db import MigrationError, init_db
+from .handlers import admin_catalogue, catalogue, router
 from .handlers import cart as cart_handlers
 from .handlers.common import (
     get_lang,
     help_placeholder,
     lang_route,
+    library_route,
     menu_show,
     start,
     unknown_callback,
@@ -34,11 +36,13 @@ from .handlers.common import (
 from .i18n import t
 from .keyboards import main_reply_keyboard
 from .repo import admin_pending as admin_pending_repo
+from .seed_demo import seed_demo
+from .tg import IgnoreUpdate
 
 
 def configure_logging() -> None:
     logging.basicConfig(
-        level=CONFIG.log_level,
+        level=get_settings().log_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     # httpx/httpcore log outgoing request URLs at INFO, and those URLs embed
@@ -47,11 +51,13 @@ def configure_logging() -> None:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
-configure_logging()
 logger = logging.getLogger(__name__)
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if isinstance(context.error, IgnoreUpdate):
+        logger.debug("Ignored update: %s", context.error)
+        return
     user_id = None
     action = None
     if isinstance(update, Update):
@@ -73,12 +79,13 @@ async def _admin_route(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     row. Kept here, not in admin_catalogue.py, so that module stays
     untouched beyond the prompt-side removal already in
     handlers/admin_common.py's prompt()."""
-    had_pending = admin_pending_repo.get(CONFIG.owner_id) is not None
+    owner_id = get_settings().owner_id
+    had_pending = admin_pending_repo.get(owner_id) is not None
     await admin_catalogue.route(update, context)
-    if had_pending and admin_pending_repo.get(CONFIG.owner_id) is None:
-        lang = get_lang(CONFIG.owner_id)
+    if had_pending and admin_pending_repo.get(owner_id) is None:
+        lang = get_lang(owner_id)
         await context.bot.send_message(
-            chat_id=CONFIG.owner_id,
+            chat_id=owner_id,
             text=t("common.menu_restored", lang),
             reply_markup=main_reply_keyboard(lang),
         )
@@ -86,7 +93,13 @@ async def _admin_route(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 def build_application() -> Application:
     defaults = Defaults(parse_mode=ParseMode.HTML)
-    application = Application.builder().token(CONFIG.bot_token).defaults(defaults).build()
+    settings = get_settings()
+    application = (
+        Application.builder()
+        .token(settings.bot_token.get_secret_value())
+        .defaults(defaults)
+        .build()
+    )
 
     # Group -1 runs before every other handler group, so this applies to
     # both message and callback updates without touching individual
@@ -95,31 +108,19 @@ def build_application() -> Application:
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(
-        CommandHandler("admin", admin_catalogue.dashboard, filters=filters.User(CONFIG.owner_id))
-    )
-    application.add_handler(
-        CommandHandler("order", admin_orders.find_order, filters=filters.User(CONFIG.owner_id))
-    )
-    application.add_handler(
-        CommandHandler("sweep", admin_orders.sweep_now, filters=filters.User(CONFIG.owner_id))
+        CommandHandler("admin", admin_catalogue.dashboard, filters=filters.User(settings.owner_id))
     )
 
     application.add_handler(CallbackQueryHandler(catalogue.route, pattern=r"^cat:"))
     application.add_handler(CallbackQueryHandler(cart_handlers.route, pattern=r"^cart:"))
-    application.add_handler(CallbackQueryHandler(checkout.co_route, pattern=r"^co:"))
-    application.add_handler(CallbackQueryHandler(checkout.orders_route, pattern=r"^ord:"))
-    application.add_handler(CallbackQueryHandler(shipping.route, pattern=r"^sh:"))
     application.add_handler(CallbackQueryHandler(_admin_route, pattern=r"^adm:"))
+    application.add_handler(CallbackQueryHandler(library_route, pattern=r"^lib:"))
     application.add_handler(CallbackQueryHandler(menu_show, pattern=r"^menu:"))
     application.add_handler(CallbackQueryHandler(help_placeholder, pattern=r"^help:"))
     application.add_handler(CallbackQueryHandler(lang_route, pattern=r"^lang:"))
 
     # The single free-text handler must come before the catch-all too.
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, router.route_text))
-    # Phase 6: payment proof by screenshot, narrowly scoped to router.route_photo
-    # (accepted only with an active order eligible for proof) — photo support
-    # was otherwise deliberately removed in Phase 2.5.
-    application.add_handler(MessageHandler(filters.PHOTO, router.route_photo))
 
     # Catch-all must be registered last so it only matches callbacks no
     # earlier handler recognized.
@@ -127,20 +128,19 @@ def build_application() -> Application:
 
     application.add_error_handler(on_error)
 
-    # A single recurring sweep, not a job per order — see bot/jobs.py for why.
-    # A short first-run delay keeps it from firing during startup.
-    application.job_queue.run_repeating(  # type: ignore[union-attr]  # job_queue is configured by the [job-queue] extra
-        jobs.sweep_job,
-        interval=jobs.SWEEP_INTERVAL_SECONDS,
-        first=jobs.SWEEP_FIRST_RUN_DELAY_SECONDS,
-    )
-
     return application
 
 
 def main() -> None:
-    logger.info("Initializing database at %s", CONFIG.db_path)
-    init_db()
+    settings = get_settings()
+    configure_logging()
+    logger.info("Initializing database at %s", settings.db_path)
+    try:
+        init_db()
+    except MigrationError as exc:
+        sys.exit(f"Database migration failed: {exc}")
+    if seed_demo():
+        logger.info("Demo catalogue loaded (SEED_DEMO is on)")
 
     application = build_application()
     logger.info("Starting bot polling")

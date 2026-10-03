@@ -27,4 +27,17 @@ jobs:
       - name: Mypy
         run: mypy
       - name: Tests
-        run: pytest --cov
+        run: pytest --cov --cov-fail-under=0
+      - name: Coverage (80% outside handlers)
+        run: coverage report --omit="bot/handlers/*" --fail-under=80
+      - name: Coverage (60% in handlers)
+        run: coverage report --include="bot/handlers/*" --fail-under=60
+      - name: Wheel contains migrations
+        run: |
+          pip wheel . --no-deps -w dist-check
+          python - <<'PY'
+          import glob, zipfile
+          names = zipfile.ZipFile(glob.glob("dist-check/*.whl")[0]).namelist()
+          assert any(n.startswith("bot/migrations/") and n.endswith(".sql") for n in names), names
+          assert "bot/seed_demo.json" in names, names
+          PY

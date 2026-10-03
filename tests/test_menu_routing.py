@@ -1,10 +1,5 @@
 """Reply-keyboard routing: persistent-keyboard taps arrive as plain text, so
-only an EXACT label match may dispatch.
-
-Transitional: this exercises handlers/router.py, which is scheduled for
-rewrite. The label-to-action mapping itself is covered in test_keyboards.py
-and survives; keep the cases below when the router is rebuilt.
-"""
+only an EXACT label match may dispatch."""
 
 from __future__ import annotations
 
@@ -19,21 +14,21 @@ from .conftest import OWNER_ID
 from .helpers import make_context, make_message, make_update
 
 LABELS = [(lang, label) for lang, labels in MENU_LABELS.items() for label in labels]
-ACTION_BY_INDEX = ["show_categories", "show_cart", "show_order_list"]
+ACTION_BY_INDEX = ["show_categories", "show_cart", "show_library_stub"]
 
 
 @pytest.fixture
 def targets(monkeypatch):
-    from bot.handlers import cart, catalogue, checkout
+    from bot.handlers import cart, catalogue
 
     mocks = {
         "show_categories": AsyncMock(),
         "show_cart": AsyncMock(),
-        "show_order_list": AsyncMock(),
+        "show_library_stub": AsyncMock(),
     }
     monkeypatch.setattr(catalogue, "show_categories", mocks["show_categories"])
     monkeypatch.setattr(cart, "show_cart", mocks["show_cart"])
-    monkeypatch.setattr(checkout, "show_order_list", mocks["show_order_list"])
+    monkeypatch.setattr(router, "show_library_stub", mocks["show_library_stub"])
     return mocks
 
 

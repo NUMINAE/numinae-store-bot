@@ -61,7 +61,9 @@ def test_parse_cb_id_tolerates_wrong_types():
 
 
 def test_parse_cb_id_oversized_input_does_not_raise():
-    assert parse_cb_id("9" * 100) == int("9" * 100)  # huge but valid
+    assert parse_cb_id("9" * 100) is None  # beyond SQLite's INTEGER range
+    assert parse_cb_id(str(2**63 - 1)) == 2**63 - 1
+    assert parse_cb_id(str(2**63)) is None
     assert parse_cb_id("9" * 100_000 + "x") is None
 
 
@@ -94,10 +96,10 @@ def test_cb_counts_bytes_not_characters():
 def test_every_label_maps_to_an_action_in_both_languages():
     assert set(MENU_LABELS) == {"en", "ru"}
     for labels in MENU_LABELS.values():
-        browse, cart, orders = labels
+        browse, cart, library = labels
         assert MENU_ACTION_BY_LABEL[browse] == "browse"
         assert MENU_ACTION_BY_LABEL[cart] == "cart"
-        assert MENU_ACTION_BY_LABEL[orders] == "orders"
+        assert MENU_ACTION_BY_LABEL[library] == "library"
     assert len(MENU_ACTION_BY_LABEL) == 6
 
 

@@ -8,10 +8,8 @@ from ..db import get_conn, transaction
 
 EDITABLE_KEYS = (
     "welcome_text",
-    "shipping_note",
     "support_note",
-    "order_expiry_hours",
-    "reminder_percents",
+    "reservation_minutes",
 )
 
 

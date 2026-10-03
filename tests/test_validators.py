@@ -17,7 +17,7 @@ from bot.handlers.admin_common import Invalid, Valid
         ("⭐ 75", 75),
         ("⭐️75", 75),
         ("1", 1),
-        ("100000", 100_000),
+        ("25000", 25_000),
     ],
 )
 def test_prices_accept_whole_stars(text, amount):
@@ -35,7 +35,7 @@ def test_prices_accept_whole_stars(text, amount):
         "00",
         "-1",
         "-⭐5",
-        "100001",
+        "25001",
         "1000000",
         "abc",
         "",
@@ -59,7 +59,7 @@ def _message(result: Valid[int] | Invalid) -> str:
 
 def test_price_error_messages_are_specific():
     assert "at least" in _message(admin_common.validate_price("0"))
-    assert "100000" in _message(admin_common.validate_price("100001"))
+    assert "25000" in _message(admin_common.validate_price("25001"))
     assert "whole number" in _message(admin_common.validate_price("1.5"))
 
 

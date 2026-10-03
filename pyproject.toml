@@ -57,6 +57,8 @@ module = [
     "bot.render",
     "bot.ratelimit",
     "bot.owner_notify",
+    "bot.delivery",
+    "bot.payments.*",
 ]
 disallow_untyped_defs = true
 

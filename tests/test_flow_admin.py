@@ -187,7 +187,7 @@ async def test_delivery_text_action_is_text_editions_only(flow):
 # --- Stars prices through the typed-input handler -----------------------------------------------
 
 
-@pytest.mark.parametrize("bad", ["7.5", "7,5", "0", "⭐0", "-3", "100001", "abc", "", "1e3", "⭐"])
+@pytest.mark.parametrize("bad", ["7.5", "7,5", "0", "⭐0", "-3", "25001", "abc", "", "1e3", "⭐"])
 async def test_bad_prices_are_rejected_and_the_edit_stays_pending(flow, bad):
     variant_id = await create_edition(flow, price="10")
     await flow.tap(admin_catalogue.route, f"adm:va:ep:{variant_id}")
@@ -197,7 +197,7 @@ async def test_bad_prices_are_rejected_and_the_edit_stays_pending(flow, bad):
     assert pending_repo.get(OWNER_ID)["action"] == "var_edit_price"
 
 
-@pytest.mark.parametrize(("good", "expected"), [("75", 75), ("⭐75", 75), ("100000", 100000)])
+@pytest.mark.parametrize(("good", "expected"), [("75", 75), ("⭐75", 75), ("25000", 25000)])
 async def test_good_prices_are_accepted(flow, good, expected):
     variant_id = await create_edition(flow, price="10")
     await flow.tap(admin_catalogue.route, f"adm:va:ep:{variant_id}")

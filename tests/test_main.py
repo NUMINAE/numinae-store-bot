@@ -10,6 +10,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
+    PreCheckoutQueryHandler,
     TypeHandler,
 )
 
@@ -41,27 +42,39 @@ def test_build_application_registers_the_expected_handlers(boot_env):
     assert any(isinstance(h, TypeHandler) and h.type is Update for h in application.handlers[-1])
 
     commands = {c for h in handlers if isinstance(h, CommandHandler) for c in h.commands}
-    assert commands == {"start", "admin"}  # /order and /sweep are gone
+    assert commands == {"start", "admin", "paysupport", "sweep"}
 
     patterns = {
         h.pattern.pattern
         for h in handlers
         if isinstance(h, CallbackQueryHandler) and h.pattern is not None
     }
-    assert patterns == {r"^cat:", r"^cart:", r"^adm:", r"^lib:", r"^menu:", r"^help:", r"^lang:"}
+    assert patterns == {
+        r"^cat:",
+        r"^cart:",
+        r"^co:",
+        r"^adm:",
+        r"^lib:",
+        r"^menu:",
+        r"^help:",
+        r"^lang:",
+    }
 
-    text_handlers = [h for h in handlers if isinstance(h, MessageHandler)]
-    assert len(text_handlers) == 1  # the photo handler is gone
+    message_handlers = [h for h in handlers if isinstance(h, MessageHandler)]
+    assert len(message_handlers) == 2  # free text + successful_payment; no photo handler
+    assert len([h for h in handlers if isinstance(h, PreCheckoutQueryHandler)]) == 1
 
     catch_all = [h for h in handlers if isinstance(h, CallbackQueryHandler) and h.pattern is None]
     assert len(catch_all) == 1
     assert application.error_handlers
 
 
-def test_no_background_jobs_are_scheduled(boot_env):
+def test_the_recurring_sweep_is_scheduled(boot_env):
     application = main.build_application()
     assert application.job_queue is not None
-    assert application.job_queue.jobs() == ()
+    (job,) = application.job_queue.jobs()
+    assert job.name == "sweep_job"
+    assert job.trigger.interval.total_seconds() == 60
 
 
 def test_main_migrates_seeds_and_starts_polling(boot_env, monkeypatch):
@@ -93,3 +106,57 @@ def test_main_does_not_seed_when_disabled(boot_env, monkeypatch):
     monkeypatch.setattr(Application, "run_polling", lambda self, *a, **k: None)
     main.main()
     assert db_module.get_conn().execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0
+
+
+# --- R2: payments wiring ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"), [("mock", "MockProvider"), ("stars", "StarsProvider")]
+)
+def test_the_provider_is_built_from_the_payment_mode_into_bot_data(
+    boot_env, monkeypatch, mode, expected
+):
+    monkeypatch.setenv("PAYMENT_MODE", mode)
+    get_settings.cache_clear()
+    application = main.build_application()
+    provider = application.bot_data["payment_provider"]
+    assert type(provider).__name__ == expected and provider.mode == mode
+
+
+def test_main_boots_in_mock_mode_and_registers_every_handler(boot_env, monkeypatch):
+    monkeypatch.setenv("PAYMENT_MODE", "mock")
+    get_settings.cache_clear()
+    captured = []
+    monkeypatch.setattr(Application, "run_polling", lambda self, *a, **k: captured.append(self))
+
+    main.main()
+
+    (application,) = captured
+    assert application.bot_data["payment_provider"].mode == "mock"
+    handlers = [h for group in application.handlers.values() for h in group]
+    callbacks = {h.callback.__name__ for h in handlers}
+    for name in (
+        "start",
+        "dashboard",
+        "paysupport",
+        "sweep_command",
+        "route",
+        "route_text",
+        "pre_checkout",
+        "successful_payment",
+        "menu_show",
+        "help_placeholder",
+        "lang_route",
+        "unknown_callback",
+        "throttle",
+    ):
+        assert name in callbacks, name
+    patterns = {
+        h.pattern.pattern
+        for h in handlers
+        if isinstance(h, CallbackQueryHandler) and h.pattern is not None
+    }
+    assert {r"^co:", r"^lib:", r"^cat:", r"^cart:", r"^adm:"} <= patterns
+    assert [j.name for j in application.job_queue.jobs()] == ["sweep_job"]
+    assert db_module.get_conn().execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 3

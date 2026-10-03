@@ -1,6 +1,6 @@
-"""Cart screen: view, adjust, remove, clear (with confirmation), and the
-checkout stub. Keyed on variant_id throughout. Registered under the "cart:"
-callback namespace and routed by action word.
+"""Cart screen: view, adjust, remove, clear (with confirmation). The Checkout
+button hands over to handlers/checkout ("co:start"). Keyed on variant_id
+throughout. Registered under the "cart:" callback namespace and routed by action word.
 
 Quantity limits live in repo/cart.py; this module only surfaces them: the "+"
 button is hidden at the cap (a stale one alerts), and a line the repo removes
@@ -15,6 +15,7 @@ from telegram.ext import ContextTypes
 
 from ..i18n import t
 from ..keyboards import cb, parse_callback, parse_cb_id
+from ..limits import MAX_ORDER_STARS
 from ..render import bold, esc, stars, strike
 from ..repo import cart
 from ..repo import products as products_repo
@@ -107,13 +108,13 @@ async def show_cart(
 
     body.append("")
     body.append(bold(t("cart.subtotal", lang, amount=stars(subtotal))))
+    if subtotal > MAX_ORDER_STARS:
+        body.append(t("cart.over_limit_warning", lang, limit=MAX_ORDER_STARS))
     text = "\n".join(body)
 
     buttons.append(
         [
-            InlineKeyboardButton(
-                t("cart.checkout_button", lang), callback_data=cb("cart", "checkout")
-            ),
+            InlineKeyboardButton(t("cart.checkout_button", lang), callback_data=cb("co", "start")),
             InlineKeyboardButton(
                 t("cart.clear_cart_button", lang), callback_data=cb("cart", "clear", "ask")
             ),
@@ -227,21 +228,6 @@ async def cart_clear_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await show_cart(update, context)
 
 
-async def cart_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Temporary stub until checkout is built (R2)."""
-    lang = get_lang(require_user(update).id)
-    keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    t("cart.back_to_cart_button", lang), callback_data=cb("cart", "view")
-                )
-            ]
-        ]
-    )
-    await show_screen(update, context, text=t("cart.checkout_stub", lang), keyboard=keyboard)
-
-
 async def route(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = require_query(update)
     parts = parse_callback(require_data(query), range(2, 5))
@@ -268,7 +254,5 @@ async def route(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await cart_clear_yes(update, context)
         else:
             await cart_clear_no(update, context)
-    elif action == "checkout":
-        await cart_checkout(update, context)
     else:
         await _expired(update)

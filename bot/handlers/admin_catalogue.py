@@ -12,6 +12,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from ..keyboards import cb, parse_callback, parse_cb_id
+from ..limits import MAX_ORDER_STARS
 from ..render import bold, esc, stars
 from ..repo import admin_pending as pending_repo
 from ..repo import categories as categories_repo
@@ -28,7 +29,7 @@ PRODUCTS_PAGE_SIZE = 5
 
 _DELIVERY_NAMES = {"file": "File", "key": "Keys", "text": "Text"}
 _KIND_BY_CODE = {"f": "file", "k": "key", "t": "text"}
-_PRICE_PROMPT = "Send the price in whole Stars, e.g. 75 or ⭐75 (1–100000)."
+_PRICE_PROMPT = f"Send the price in whole Stars, e.g. 75 or ⭐75 (1–{MAX_ORDER_STARS})."
 _DELIVERY_TEXT_PROMPT = (
     "Send the text customers receive after paying — e.g. a download link or instructions "
     "(1–2000 characters)."
@@ -926,7 +927,8 @@ async def _apply_var_create_label(update, context, target_id, context_id, raw) -
     await _prompt(
         update,
         context,
-        f'What\'s the price for "{esc(value)}"? Send whole Stars, e.g. 75 or ⭐75 (1–100000).',
+        f'What\'s the price for "{esc(value)}"? '
+        f"Send whole Stars, e.g. 75 or ⭐75 (1–{MAX_ORDER_STARS}).",
     )
 
 

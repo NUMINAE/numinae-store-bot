@@ -67,10 +67,6 @@ STRINGS: dict[str, dict[str, str]] = {
             "Telegram. Цифровые товары приходят прямо в этот чат сразу после оплаты."
         ),
     },
-    "library.stub": {
-        "en": "Your library will appear here once checkout opens.",
-        "ru": "Ваша библиотека появится здесь, когда откроется оплата.",
-    },
     # -- catalogue.py -------------------------------------------------------
     "catalogue.no_stock": {
         "en": "Nothing is available right now — check back soon!",
@@ -156,6 +152,178 @@ STRINGS: dict[str, dict[str, str]] = {
     "cart.item_plural": {"en": "items", "ru": "товаров"},
     "cart.yes_clear_button": {"en": "Yes, clear", "ru": "Да, очистить"},
     "cart.no_button": {"en": "No", "ru": "Нет"},
+    # -- payments / delivery ----------------------------------------------------
+    "pay.invoice_title": {"en": "Order #{id}", "ru": "Заказ №{id}"},
+    "pay.invoice_description": {
+        "en": "Digital goods: {items}",
+        "ru": "Цифровые товары: {items}",
+    },
+    "pay.pay_button": {"en": "Pay ⭐ {total}", "ru": "Оплатить ⭐ {total}"},
+    "pay.cancel_order_button": {"en": "Cancel order", "ru": "Отменить заказ"},
+    "pay.mock_banner": {
+        "en": "🧪 DEMO MODE — no real payment",
+        "ru": "🧪 ДЕМО-РЕЖИМ — реальная оплата не производится",
+    },
+    "pay.mock_heading": {"en": "Order #{id}", "ru": "Заказ №{id}"},
+    "pay.mock_total": {"en": "Total: {total}", "ru": "Итого: {total}"},
+    "pay.mock_pay_button": {"en": "Pay (demo)", "ru": "Оплатить (демо)"},
+    "deliver.text": {"en": "{name}\n\n{body}", "ru": "{name}\n\n{body}"},
+    "deliver.file_caption": {"en": "{name}", "ru": "{name}"},
+    "deliver.keys": {"en": "{name}\n\n{keys}", "ru": "{name}\n\n{keys}"},
+    "deliver.receipt": {
+        "en": "✅ Thank you! Order #{id} is complete.\n\n{items}\n\nTotal: {total}",
+        "ru": "✅ Спасибо! Заказ №{id} выполнен.\n\n{items}\n\nИтого: {total}",
+    },
+    "deliver.receipt_line": {"en": "{name} × {qty}", "ru": "{name} × {qty}"},
+    "pay.err_unavailable": {
+        "en": "This order is no longer available.",
+        "ru": "Этот заказ больше недоступен.",
+    },
+    "pay.err_not_pending": {
+        "en": "This order is no longer open for payment.",
+        "ru": "Этот заказ больше не ожидает оплаты.",
+    },
+    "pay.err_expired": {
+        "en": "This order has expired. Please start a new one.",
+        "ru": "Срок заказа истёк. Оформите новый заказ.",
+    },
+    "pay.err_mode": {
+        "en": "Payments for this order are not available right now.",
+        "ru": "Оплата этого заказа сейчас недоступна.",
+    },
+    "pay.err_amount": {
+        "en": "The amount does not match this order.",
+        "ru": "Сумма не соответствует заказу.",
+    },
+    "pay.err_reservation": {
+        "en": "Your items are no longer reserved. Please start a new order.",
+        "ru": "Ваши товары больше не зарезервированы. Оформите новый заказ.",
+    },
+    "pay.received": {
+        "en": "✅ Payment received for order #{id}. Your items are on their way.",
+        "ru": "✅ Оплата заказа №{id} получена. Ваши товары уже в пути.",
+    },
+    "pay.received_delayed": {
+        "en": "✅ Payment received for order #{id}. Delivery is delayed — we are sorting it out and will send your items shortly.",
+        "ru": "✅ Оплата заказа №{id} получена. Доставка задерживается — мы разбираемся и скоро отправим ваши товары.",
+    },
+    "pay.orphan_expired": {
+        "en": "Your payment for order #{id} arrived after the order expired, so it has been refunded.",
+        "ru": "Оплата заказа №{id} пришла после истечения срока заказа, поэтому она возвращена.",
+    },
+    "pay.orphan_paid": {
+        "en": "That was a duplicate payment for order #{id}, which was already paid. It has been refunded.",
+        "ru": "Это был повторный платёж за уже оплаченный заказ №{id}. Он возвращён.",
+    },
+    "pay.orphan_refund_failed": {
+        "en": "Your payment for order #{id} could not be applied and the automatic refund failed. The shop owner has been alerted and will sort it out.",
+        "ru": "Платёж за заказ №{id} не удалось применить, а автоматический возврат не прошёл. Владелец магазина уведомлён и всё решит.",
+    },
+    "pay.mismatch": {
+        "en": "We could not match your payment to order #{id}. The shop owner has been alerted.",
+        "ru": "Не удалось сопоставить ваш платёж с заказом №{id}. Владелец магазина уведомлён.",
+    },
+    "pay.support_text": {
+        "en": "Need help with a payment? Quote your order number when you contact the shop.\n\n{note}",
+        "ru": "Нужна помощь с оплатой? При обращении в магазин назовите номер заказа.\n\n{note}",
+    },
+    "checkout.empty": {
+        "en": "There is nothing in your cart to check out. Add something from the catalogue first.",
+        "ru": "В корзине нечего оформлять. Сначала добавьте товары из каталога.",
+    },
+    "checkout.open_order": {
+        "en": "You already have an open order (#{id}). It expires in {minutes} min.",
+        "ru": "У вас уже есть открытый заказ (№{id}). Он истечёт через {minutes} мин.",
+    },
+    "checkout.resume_button": {"en": "Resume", "ru": "Продолжить"},
+    "checkout.review_heading": {"en": "Review your order", "ru": "Проверьте заказ"},
+    "checkout.total": {"en": "Total: {total}", "ru": "Итого: {total}"},
+    "checkout.demo_notice": {
+        "en": "🧪 Demo mode: no real payment will be taken.",
+        "ru": "🧪 Демо-режим: реальная оплата не производится.",
+    },
+    "checkout.pay_button": {"en": "Pay ⭐ {total}", "ru": "Оплатить ⭐ {total}"},
+    "checkout.dropped_note": {
+        "en": "{count} unavailable item(s) were left out of this order.",
+        "ru": "Недоступные товары ({count} шт.) не вошли в заказ.",
+    },
+    "checkout.too_large": {
+        "en": "Your order comes to ⭐ {total}, above the ⭐ {limit} limit for a single order. Remove some items and try again.",
+        "ru": "Сумма заказа ⭐ {total} превышает лимит ⭐ {limit} на один заказ. Уберите часть товаров и попробуйте снова.",
+    },
+    "checkout.stock_short": {
+        "en": "Only {available} left of one of your items. Lower its quantity in your cart and try again.",
+        "ru": "Одного из ваших товаров осталось только {available}. Уменьшите количество в корзине и попробуйте снова.",
+    },
+    "checkout.presented": {
+        "en": "Order #{id} is ready — complete the payment in the message below.",
+        "ru": "Заказ №{id} готов — завершите оплату в сообщении ниже.",
+    },
+    "checkout.mode_changed": {
+        "en": "That order was created in a different payment mode and has been cancelled. Please start checkout again.",
+        "ru": "Этот заказ был создан в другом режиме оплаты и отменён. Начните оформление заново.",
+    },
+    "checkout.cancel_confirm": {
+        "en": "Cancel order #{id}? Your items will go back to your cart.",
+        "ru": "Отменить заказ №{id}? Товары вернутся в корзину.",
+    },
+    "checkout.yes_cancel_button": {"en": "Yes, cancel", "ru": "Да, отменить"},
+    "checkout.keep_button": {"en": "No, keep it", "ru": "Нет, оставить"},
+    "checkout.cancelled": {
+        "en": "Order #{id} was cancelled.",
+        "ru": "Заказ №{id} отменён.",
+    },
+    "checkout.cancelled_restored": {
+        "en": "Order #{id} was cancelled. Your items are back in your cart.",
+        "ru": "Заказ №{id} отменён. Товары вернулись в корзину.",
+    },
+    "checkout.cancel_refused": {
+        "en": "This order can't be cancelled any more.",
+        "ru": "Этот заказ уже нельзя отменить.",
+    },
+    "checkout.present_failed": {
+        "en": "We couldn't start the payment. Your items are back in your cart. Please try again.",
+        "ru": "Не удалось начать оплату. Товары вернулись в корзину. Попробуйте ещё раз.",
+    },
+    "checkout.mock_done": {
+        "en": "🧪 Demo payment complete for order #{id}.",
+        "ru": "🧪 Демо-оплата заказа №{id} завершена.",
+    },
+    "checkout.mock_unavailable": {
+        "en": "Demo payments are not available.",
+        "ru": "Демо-оплата недоступна.",
+    },
+    "cart.over_limit_warning": {
+        "en": "⚠️ Your cart is over the ⭐ {limit} limit for one order — remove some items to check out.",
+        "ru": "⚠️ Сумма корзины превышает лимит ⭐ {limit} на один заказ — уберите часть товаров, чтобы оформить заказ.",
+    },
+    "jobs.order_expired": {
+        "en": "Your order #{id} expired and its reservation was released. You can start a new one any time.",
+        "ru": "Срок заказа №{id} истёк, резерв снят. Вы можете оформить новый заказ в любое время.",
+    },
+    "library.heading": {"en": "My Library", "ru": "Моя библиотека"},
+    "library.empty": {
+        "en": "Your library is empty. Things you buy will appear here.",
+        "ru": "Ваша библиотека пуста. Здесь появятся ваши покупки.",
+    },
+    "library.item_detail": {
+        "en": "{name}\nOrder #{id}\nStatus: {status}",
+        "ru": "{name}\nЗаказ №{id}\nСтатус: {status}",
+    },
+    "library.being_delivered": {"en": "Being delivered", "ru": "Доставляется"},
+    "library.status_delivered": {"en": "Delivered", "ru": "Доставлен"},
+    "library.status_refunded": {"en": "Refunded", "ru": "Возвращён"},
+    "library.send_button": {"en": "Send again", "ru": "Отправить снова"},
+    "library.back_button": {"en": "Back to library", "ru": "Назад в библиотеку"},
+    "library.resent": {"en": "Sent again.", "ru": "Отправлено снова."},
+    "library.resend_failed": {
+        "en": "Couldn't send it right now. Try again in a moment.",
+        "ru": "Сейчас отправить не удалось. Попробуйте чуть позже.",
+    },
+    "library.unavailable": {
+        "en": "That item is not available.",
+        "ru": "Этот товар недоступен.",
+    },
     # -- order status labels (customer-facing) -------------------------------
     "status.pending_payment": {"en": "Awaiting payment", "ru": "Ожидает оплаты"},
     "status.paid": {"en": "Paid", "ru": "Оплачен"},

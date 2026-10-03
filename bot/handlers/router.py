@@ -16,8 +16,8 @@ from ..i18n import t
 from ..keyboards import MENU_ACTION_BY_LABEL, main_reply_keyboard
 from ..repo import admin_pending as admin_pending_repo
 from ..tg import require_message, require_text, require_user
-from . import admin_catalogue, catalogue
-from .common import get_lang, render_main_menu, show_library_stub, touch_customer
+from . import admin_catalogue, catalogue, library
+from .common import get_lang, render_main_menu, touch_customer
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ async def _dispatch_menu_button(
     elif action == "cart":
         await cart_handlers.show_cart(update, context)
     elif action == "library":
-        await show_library_stub(update, context)
+        await library.show_library(update, context, 0)
     else:
         return False
     return True

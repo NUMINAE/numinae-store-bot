@@ -14,21 +14,21 @@ from .conftest import OWNER_ID
 from .helpers import make_context, make_message, make_update
 
 LABELS = [(lang, label) for lang, labels in MENU_LABELS.items() for label in labels]
-ACTION_BY_INDEX = ["show_categories", "show_cart", "show_library_stub"]
+ACTION_BY_INDEX = ["show_categories", "show_cart", "show_library"]
 
 
 @pytest.fixture
 def targets(monkeypatch):
-    from bot.handlers import cart, catalogue
+    from bot.handlers import cart, catalogue, library
 
     mocks = {
         "show_categories": AsyncMock(),
         "show_cart": AsyncMock(),
-        "show_library_stub": AsyncMock(),
+        "show_library": AsyncMock(),
     }
     monkeypatch.setattr(catalogue, "show_categories", mocks["show_categories"])
     monkeypatch.setattr(cart, "show_cart", mocks["show_cart"])
-    monkeypatch.setattr(router, "show_library_stub", mocks["show_library_stub"])
+    monkeypatch.setattr(library, "show_library", mocks["show_library"])
     return mocks
 
 

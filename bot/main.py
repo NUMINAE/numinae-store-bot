@@ -15,26 +15,27 @@ from telegram.ext import (
     ContextTypes,
     Defaults,
     MessageHandler,
+    PreCheckoutQueryHandler,
     TypeHandler,
     filters,
 )
 
-from . import ratelimit
+from . import jobs, ratelimit
 from .config import get_settings
 from .db import MigrationError, init_db
-from .handlers import admin_catalogue, catalogue, router
+from .handlers import admin_catalogue, catalogue, checkout, library, payments, router
 from .handlers import cart as cart_handlers
 from .handlers.common import (
     get_lang,
     help_placeholder,
     lang_route,
-    library_route,
     menu_show,
     start,
     unknown_callback,
 )
 from .i18n import t
 from .keyboards import main_reply_keyboard
+from .payments.registry import build_provider
 from .repo import admin_pending as admin_pending_repo
 from .seed_demo import seed_demo
 from .tg import IgnoreUpdate
@@ -104,17 +105,30 @@ def build_application() -> Application:
     # Group -1 runs before every other handler group, so this applies to
     # both message and callback updates without touching individual
     # handlers. The owner is exempt (see bot/ratelimit.py).
+    # Payment updates (pre_checkout_query, successful_payment) are exempt
+    # inside the throttle itself.
     application.add_handler(TypeHandler(Update, ratelimit.throttle), group=-1)
+
+    application.bot_data[payments.PROVIDER_KEY] = build_provider(settings.payment_mode)
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(
         CommandHandler("admin", admin_catalogue.dashboard, filters=filters.User(settings.owner_id))
     )
+    application.add_handler(CommandHandler("paysupport", payments.paysupport))
+    # /sweep is owner-only through its decorator, so a stranger is told so
+    # rather than silently ignored.
+    application.add_handler(CommandHandler("sweep", jobs.sweep_command))
+
+    # Payments: both must be registered before the catch-all handlers below.
+    application.add_handler(PreCheckoutQueryHandler(payments.pre_checkout))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, payments.successful_payment))
 
     application.add_handler(CallbackQueryHandler(catalogue.route, pattern=r"^cat:"))
     application.add_handler(CallbackQueryHandler(cart_handlers.route, pattern=r"^cart:"))
     application.add_handler(CallbackQueryHandler(_admin_route, pattern=r"^adm:"))
-    application.add_handler(CallbackQueryHandler(library_route, pattern=r"^lib:"))
+    application.add_handler(CallbackQueryHandler(checkout.route, pattern=r"^co:"))
+    application.add_handler(CallbackQueryHandler(library.route, pattern=r"^lib:"))
     application.add_handler(CallbackQueryHandler(menu_show, pattern=r"^menu:"))
     application.add_handler(CallbackQueryHandler(help_placeholder, pattern=r"^help:"))
     application.add_handler(CallbackQueryHandler(lang_route, pattern=r"^lang:"))
@@ -127,6 +141,15 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(unknown_callback))
 
     application.add_error_handler(on_error)
+
+    # One recurring sweep (not a job per order); a short first-run delay keeps
+    # it from firing during startup.
+    if application.job_queue is not None:
+        application.job_queue.run_repeating(
+            jobs.sweep_job,
+            interval=jobs.SWEEP_INTERVAL_SECONDS,
+            first=jobs.SWEEP_FIRST_RUN_DELAY_SECONDS,
+        )
 
     return application
 

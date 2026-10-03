@@ -16,6 +16,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRe
 from telegram.ext import ContextTypes
 
 from ..keyboards import cb
+from ..limits import MAX_ORDER_STARS
 from ..render import stars
 from ..tg import require_message
 from ..ui import show_screen
@@ -36,7 +37,7 @@ class Invalid:
     message: str
 
 
-MAX_PRICE_STARS = 100_000
+MAX_PRICE_STARS = MAX_ORDER_STARS  # a single edition can never exceed one invoice
 MAX_DELIVERY_TEXT_LEN = 2000
 _PRICE_RE = re.compile(r"^(?:⭐\ufe0f?\s*)?(\d{1,12})$")
 _PRICE_HELP = "Send a whole number of Stars, e.g. 75 or ⭐75."

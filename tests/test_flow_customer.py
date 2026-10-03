@@ -11,7 +11,7 @@ import re
 
 import pytest
 
-from bot.handlers import cart, catalogue, common
+from bot.handlers import cart, catalogue, checkout, common, library
 from bot.repo import cart as cart_repo
 from bot.repo import categories as categories_repo
 from bot.repo import products as products_repo
@@ -358,11 +358,12 @@ async def test_clear_cart_asks_first_and_no_keeps_the_cart(flow):
     assert cart_repo.list_lines(USER) == []
 
 
-async def test_checkout_is_a_stub_with_a_way_back(flow):
+async def test_the_checkout_button_hands_over_to_the_checkout_flow(flow):
     cart_repo.add(USER, TEXT_EDITION, 1)
     await flow.tap(cart.route, "cart:view")
-    await flow.tap(cart.route, flow.data_for("Checkout"))
-    assert flow.text == "Checkout opens in the next release."
+    assert flow.data_for("Checkout") == "co:start"
+    await flow.tap(checkout.route, "co:start")
+    assert "Review your order" in flow.text
     assert "Back to cart" in flow.labels()
     await flow.tap(cart.route, flow.data_for("Back to cart"))
     assert "Your cart" in flow.text
@@ -381,14 +382,14 @@ async def test_main_menu_has_my_library_and_no_orders_button(flow):
     text, keyboard = common.render_main_menu(USER, "en")
     labels = [b.text for row in keyboard.inline_keyboard for b in row]
     datas = [b.callback_data for row in keyboard.inline_keyboard for b in row]
-    assert "My Library" in labels and "lib:show" in datas
+    assert "My Library" in labels and "lib:list:0" in datas
     assert not any("order" in label.lower() for label in labels)
     assert not any(str(d).startswith("ord:") for d in datas)
 
 
-async def test_library_button_shows_the_stub(flow):
-    await flow.tap(common.library_route, "lib:show")
-    assert "library will appear here" in flow.text
+async def test_library_button_opens_the_library(flow):
+    await flow.tap(library.route, "lib:list:0")
+    assert "library is empty" in flow.text
 
 
 async def test_language_switch_resends_the_reply_keyboard_in_the_new_language(flow):

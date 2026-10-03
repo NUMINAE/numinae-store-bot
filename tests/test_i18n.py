@@ -106,3 +106,20 @@ def test_every_order_status_has_a_label(lang, caplog):
         label = i18n.status_label(status, lang)
         assert label != f"status.{status}"
     assert _warnings(caplog) == []
+
+
+# --- R2 strings: identical placeholders in both languages -------------------------------
+
+
+def test_new_payment_and_delivery_strings_have_identical_placeholders_in_en_and_ru():
+    def fields(template: str) -> set[str]:
+        return {name for _, name, _, _ in string.Formatter().parse(template) if name}
+
+    prefixes = ("pay.", "deliver.", "checkout.", "library.", "jobs.", "cart.over_limit")
+    new_keys = [k for k in i18n.STRINGS if k.startswith(prefixes)]
+    assert new_keys, "expected R2 string groups to exist"
+    for key in new_keys:
+        entry = i18n.STRINGS[key]
+        assert set(entry) == set(i18n.LANGUAGES), key
+        assert fields(entry["en"]) == fields(entry["ru"]), key
+        assert entry["en"].strip() and entry["ru"].strip(), key

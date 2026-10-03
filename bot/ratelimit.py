@@ -53,6 +53,14 @@ def _gc(now: float) -> None:
 async def throttle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     global _calls_since_gc
 
+    # NEVER throttle payment updates. A dropped pre-checkout query cancels the
+    # customer's payment; a dropped successful_payment means they paid and the
+    # bot never recorded it.
+    if update.pre_checkout_query is not None:
+        return
+    if update.message is not None and update.message.successful_payment is not None:
+        return
+
     user = update.effective_user
     if user is None or user.id == get_settings().owner_id:
         return

@@ -12,15 +12,21 @@ from unittest.mock import AsyncMock
 import pytest
 from telegram import Chat, InlineKeyboardMarkup, Message
 
+from bot.handlers.payments import PROVIDER_KEY
+from bot.payments.registry import build_provider
+
 from .helpers import make_callback_query, make_context, make_message, make_update
 
 
 class Flow:
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, user_id: int = 1001) -> None:
+    def __init__(
+        self, monkeypatch: pytest.MonkeyPatch, user_id: int = 1001, mode: str = "mock"
+    ) -> None:
         self.user_id = user_id
         self.edit = AsyncMock()
         monkeypatch.setattr(Message, "edit_text", self.edit)
         self.context = make_context()
+        self.context.bot_data[PROVIDER_KEY] = build_provider(mode)
         self.query: Any = None
         self.screens: list[tuple[str, InlineKeyboardMarkup]] = []
         self.replies: list[str] = []
@@ -75,3 +81,8 @@ class Flow:
 
     def sent_messages(self) -> list[Any]:
         return list(self.context.bot.send_message.await_args_list)
+
+    async def drain(self) -> None:
+        """Wait for background tasks (delivery) started by handlers."""
+        while self.context.tasks:
+            await self.context.tasks.pop()

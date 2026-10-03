@@ -1,6 +1,5 @@
-"""/start, the main menu, the temporary "My Library" screen and the "Help"
-screen, the shared "menu:show" callback, and the catch-all unknown-callback
-fallback."""
+"""/start, the main menu, the "Help" screen, the shared "menu:show" callback,
+and the catch-all unknown-callback fallback."""
 
 from __future__ import annotations
 
@@ -58,7 +57,7 @@ def render_main_menu(user_id: int, lang: str) -> tuple[str, InlineKeyboardMarkup
             [InlineKeyboardButton(cart_label, callback_data=cb("cart", "view"))],
             [
                 InlineKeyboardButton(
-                    t("common.my_library_button", lang), callback_data=cb("lib", "show")
+                    t("common.my_library_button", lang), callback_data=cb("lib", "list", 0)
                 )
             ],
             [InlineKeyboardButton(t("common.help_button", lang), callback_data=cb("help", "show"))],
@@ -142,26 +141,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         t("common.reply_keyboard_intro", lang),
         reply_markup=main_reply_keyboard(lang),
     )
-
-
-async def show_library_stub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Temporary until the customer library exists (R2)."""
-    lang = get_lang(require_user(update).id)
-    keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    t("common.back_to_menu_button", lang), callback_data=cb("menu", "show")
-                )
-            ]
-        ]
-    )
-    await show_screen(update, context, text=t("library.stub", lang), keyboard=keyboard)
-
-
-async def library_route(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    touch_customer(update)
-    await show_library_stub(update, context)
 
 
 async def menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

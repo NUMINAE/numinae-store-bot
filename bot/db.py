@@ -73,6 +73,23 @@ def transaction() -> Iterator[sqlite3.Connection]:
         raise
 
 
+@contextlib.contextmanager
+def immediate_transaction() -> Iterator[sqlite3.Connection]:
+    """BEGIN IMMEDIATE ... COMMIT: takes the write lock up front, so a
+    read-then-write sequence (claiming licence keys) cannot interleave with
+    another writer. Rolls back on any exception."""
+    conn = get_conn()
+    if conn.in_transaction:
+        raise RuntimeError("immediate_transaction() cannot nest inside another transaction")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield conn
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+
+
 def init_db() -> list[str]:
     """Apply any pending migrations; returns the versions applied this call."""
     return run_migrations(get_conn(), MIGRATIONS_DIR)

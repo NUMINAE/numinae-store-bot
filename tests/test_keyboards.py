@@ -46,12 +46,14 @@ def test_parse_callback_oversized_input_does_not_raise():
 # --- parse_cb_id ------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("value", "expected"), [("0", 0), ("7", 7), ("007", 7), (" 5 ", 5)])
+@pytest.mark.parametrize(("value", "expected"), [("0", 0), ("7", 7)])  # "007" / " 5 " now rejected
 def test_parse_cb_id_accepts_non_negative_integers(value, expected):
     assert parse_cb_id(value) == expected
 
 
-@pytest.mark.parametrize("value", ["-1", "-0.5", "abc", "1.5", "", " ", "1e3", "0x10", "١٢٣x"])
+@pytest.mark.parametrize(
+    "value", ["-1", "-0.5", "abc", "1.5", "", " ", "1e3", "0x10", "١٢٣x", "007", " 5 "]
+)
 def test_parse_cb_id_rejects_everything_else(value):
     assert parse_cb_id(value) is None
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import logging
+import os
 import re
 import sqlite3
 from collections.abc import Iterator
@@ -39,16 +40,46 @@ class MigrationError(Exception):
     inconsistent. Startup must abort; nothing is auto-fixed."""
 
 
+DIR_MODE = 0o700  # the data directory: owner only
+FILE_MODE = 0o600  # the database and its -wal / -shm files: owner only
+
+
+def _restrict_permissions(
+    db_path: Path, *, created_dir: bool, enabled: bool = os.name == "posix"
+) -> None:
+    """Best-effort: make the data directory (when we just created it) and the
+    database files readable by the owner only. The database holds licence keys in
+    plaintext. Never raises: a filesystem that refuses chmod must not stop the bot.
+    Skipped where POSIX modes don't exist (Windows)."""
+    if not enabled:
+        return
+    targets: list[tuple[Path, int]] = [
+        (db_path, FILE_MODE),
+        (db_path.with_name(db_path.name + "-wal"), FILE_MODE),
+        (db_path.with_name(db_path.name + "-shm"), FILE_MODE),
+    ]
+    if created_dir:
+        targets.insert(0, (db_path.parent, DIR_MODE))
+    for path, mode in targets:
+        try:
+            if path.exists():
+                os.chmod(path, mode)
+        except OSError as exc:
+            logger.warning("Could not restrict permissions on %s: %s", path.name, exc.strerror)
+
+
 def get_conn() -> sqlite3.Connection:
     """Return the module-level connection, creating it on first use."""
     global _conn
     if _conn is None:
         db_path = get_settings().db_path
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+        created_dir = not db_path.parent.exists()
+        db_path.parent.mkdir(parents=True, exist_ok=True, mode=DIR_MODE)
         _conn = sqlite3.connect(str(db_path), check_same_thread=False)
         _conn.row_factory = sqlite3.Row
         _conn.execute("PRAGMA foreign_keys = ON")
         _conn.execute("PRAGMA journal_mode = WAL")
+        _restrict_permissions(db_path, created_dir=created_dir)
     return _conn
 
 

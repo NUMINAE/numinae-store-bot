@@ -13,6 +13,7 @@ from collections.abc import Container
 from telegram import ReplyKeyboardMarkup
 
 CALLBACK_DATA_MAX_BYTES = 64
+MAX_ROW_ID_DIGITS = 19  # len(str(2**63 - 1))
 MAX_ROW_ID = 2**63 - 1  # largest SQLite INTEGER
 
 # Persistent reply-keyboard labels for top-level customer navigation. Matched
@@ -62,12 +63,14 @@ def parse_callback(data: str, expected_parts: int | Container[int]) -> list[str]
 
 
 def parse_cb_id(value: str) -> int | None:
-    """Safely parse a callback_data segment expected to be a non-negative
-    row id. Returns None — never raises — on non-numeric input, a negative
-    value, or one too large for SQLite's 64-bit INTEGER (which would raise
-    OverflowError at query time)."""
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
+    """Parse a callback_data segment that must be a row id: a canonical, ASCII,
+    non-negative integer. No sign, whitespace, underscore, Unicode digit or leading
+    zero ("0" itself is fine), at most 19 digits, and no larger than SQLite's 64-bit
+    INTEGER (which would raise OverflowError at query time). Returns None, never
+    raises, for anything else."""
+    if not isinstance(value, str) or not (value.isascii() and value.isdigit()):
         return None
-    return n if 0 <= n <= MAX_ROW_ID else None
+    if len(value) > MAX_ROW_ID_DIGITS or (len(value) > 1 and value[0] == "0"):
+        return None
+    n = int(value)
+    return n if n <= MAX_ROW_ID else None

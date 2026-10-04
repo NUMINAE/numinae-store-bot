@@ -472,7 +472,7 @@ async def test_the_two_orphan_reasons_use_different_customer_messages(db):
     assert "duplicate payment" in texts_to(context, OTHER)[0]
 
 
-@pytest.mark.parametrize("failure", ["returns_false", "raises_telegram_error", "provider_raises"])
+@pytest.mark.parametrize("failure", ["returns_false", "raises_telegram_error", "unexpected_error"])
 async def test_a_failed_refund_alerts_the_owner_loudly(db, caplog, failure):
     caplog.set_level(logging.ERROR)
     order_id = place_order(USER, {TEXT: 1})
@@ -485,8 +485,7 @@ async def test_a_failed_refund_alerts_the_owner_loudly(db, caplog, failure):
 
         context.bot.refund_star_payment.side_effect = BadRequest("CHARGE_ALREADY_REFUNDED")
     else:
-        provider = SimpleNamespace(mode="stars", refund=AsyncMock(side_effect=RuntimeError("x")))
-        context.bot_data[payments.PROVIDER_KEY] = provider
+        context.bot.refund_star_payment.side_effect = RuntimeError("x")  # not a TelegramError
 
     await run_payment(context, order_id, "ch_b")
 
@@ -495,6 +494,61 @@ async def test_a_failed_refund_alerts_the_owner_loudly(db, caplog, failure):
     assert any("REFUND FAILED" in m and "ch_b" in m and f"#{order_id}" in m for m in owner)
     assert any("automatic refund failed" in m for m in texts_to(context, USER))
     assert orders_repo.get(order_id)["telegram_payment_charge_id"] == "ch_a"
+
+
+# --- orphans in mock mode: a REAL charge is always refunded through Stars ---------------------
+
+
+async def test_in_mock_mode_a_real_orphan_payment_is_refunded_through_stars_with_the_new_charge(
+    db,
+):
+    order_id = place_order(USER, {TEXT: 1})  # a Stars order
+    expire_now(db, order_id)
+    orders_repo.expire_due_orders()
+    context = stars_context("mock")  # the bot is now running in demo mode
+    context.bot.refund_star_payment.return_value = True
+
+    await run_payment(context, order_id, "ch_real_late")
+
+    context.bot.refund_star_payment.assert_awaited_once_with(
+        user_id=USER, telegram_payment_charge_id="ch_real_late"
+    )
+    assert any("refunded" in m for m in texts_to(context, USER))
+    assert any(
+        "refunded automatically" in m and "ch_real_late" in m for m in texts_to(context, OWNER_ID)
+    )
+
+
+@pytest.mark.parametrize("failure", ["returns_false", "raises"])
+async def test_in_mock_mode_a_failed_real_refund_tells_customer_and_owner_the_truth(db, failure):
+    order_id = place_order(USER, {TEXT: 1})
+    expire_now(db, order_id)
+    orders_repo.expire_due_orders()
+    context = stars_context("mock")
+    if failure == "returns_false":
+        context.bot.refund_star_payment.return_value = False
+    else:
+        context.bot.refund_star_payment.side_effect = RuntimeError("boom")
+
+    await run_payment(context, order_id, "ch_real_late")
+
+    context.bot.refund_star_payment.assert_awaited_once()
+    assert any("automatic refund failed" in m for m in texts_to(context, USER))
+    owner = texts_to(context, OWNER_ID)
+    assert any("REFUND FAILED" in m and "ch_real_late" in m for m in owner)
+    assert not any("refunded automatically" in m for m in owner)
+    assert not any("has been refunded" in m for m in texts_to(context, USER))
+
+
+async def test_a_demo_payment_orphan_never_sends_its_fake_charge_to_telegram(db):
+    order_id = place_order(USER, {TEXT: 1}, mode="mock")
+    expire_now(db, order_id)
+    orders_repo.expire_due_orders()
+    context = stars_context("mock")
+
+    await payments.process_payment(context, order_id, USER, "mock_fakecharge", 75, "XTR")
+
+    context.bot.refund_star_payment.assert_not_awaited()
 
 
 # --- mismatches -------------------------------------------------------------------------------

@@ -25,6 +25,7 @@ from ..config import get_settings
 from ..i18n import t, tn
 from ..payments.base import PaymentProvider
 from ..payments.checks import REJECTION_MESSAGE_KEY, PayRejection, check_payable
+from ..payments.registry import build_provider
 from ..render import bold, esc, stars
 from ..repo import customers as customers_repo
 from ..repo import orders as orders_repo
@@ -156,9 +157,15 @@ async def process_payment(
     charge_id: str,
     amount: int,
     currency: str,
+    *,
+    real_charge: bool = False,
 ) -> orders_repo.PaymentResult:
     """Record a payment and act on the outcome. The single completion path:
-    Stars payments and the demo button both end up here."""
+    Stars payments and the demo button both end up here. `real_charge` is True
+    only for a successful_payment update from Telegram: such a charge is by
+    definition a real Stars charge, so if it has to be refunded (an orphan) it is
+    refunded through the Stars provider whatever mode the bot is running in. A demo
+    payment's charge id is fake and is never sent to Telegram."""
     bot = context.bot
     provider = get_provider(context)
     result = orders_repo.complete_payment(order_id, payer_id, charge_id, amount, currency)
@@ -189,7 +196,8 @@ async def process_payment(
     elif outcome is orders_repo.PaymentOutcome.DUPLICATE:
         logger.info("Duplicate payment ignored (order_id=%s, charge_id=%s)", order_id, charge_id)
     elif outcome is orders_repo.PaymentOutcome.ORPHAN:
-        await _handle_orphan(context, provider, order_id, payer_id, charge_id, result)
+        refund_provider = build_provider("stars") if real_charge else provider
+        await _handle_orphan(context, refund_provider, order_id, payer_id, charge_id, result)
     else:  # MISMATCH
         logger.error(
             "Payment mismatch (order_id=%s, user_id=%s, charge_id=%s, amount=%s %s)",
@@ -282,6 +290,7 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
         payment.telegram_payment_charge_id,
         payment.total_amount,
         payment.currency,
+        real_charge=True,
     )
 
 

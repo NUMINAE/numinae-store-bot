@@ -24,8 +24,10 @@ class Settings(BaseSettings):
     owner_id: int
     db_path: Path = Path("data/shop.db")
     log_level: LogLevel = "INFO"
-    payment_mode: Literal["stars", "mock"] = "mock"
-    seed_demo: bool = True
+    # No default: the mode must be chosen on purpose. "mock" grants content without
+    # payment, so an unset variable must never silently fall back to it.
+    payment_mode: Literal["stars", "mock"]
+    seed_demo: bool = False
 
     @field_validator("log_level", mode="before")
     @classmethod

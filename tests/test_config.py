@@ -24,7 +24,7 @@ def clean_env(monkeypatch):
 
 
 def _valid(monkeypatch, **overrides):
-    values = {"BOT_TOKEN": TOKEN, "OWNER_ID": "42", **overrides}
+    values = {"BOT_TOKEN": TOKEN, "OWNER_ID": "42", "PAYMENT_MODE": "mock", **overrides}
     for name, value in values.items():
         monkeypatch.setenv(name, value)
 
@@ -35,8 +35,8 @@ def test_defaults(monkeypatch):
     assert s.owner_id == 42
     assert s.db_path == Path("data/shop.db")
     assert s.log_level == "INFO"
-    assert s.payment_mode == "mock"
-    assert s.seed_demo is True
+    assert s.payment_mode == "mock"  # set by _valid(): there is no default
+    assert s.seed_demo is False
 
 
 def test_explicit_values_and_log_level_is_case_insensitive(monkeypatch):
@@ -58,7 +58,7 @@ def test_explicit_values_and_log_level_is_case_insensitive(monkeypatch):
 
 def test_loads_from_a_dotenv_file(monkeypatch, tmp_path):
     env = tmp_path / ".env"
-    env.write_text(f"BOT_TOKEN={TOKEN}\nOWNER_ID=7\n", encoding="utf-8")
+    env.write_text(f"BOT_TOKEN={TOKEN}\nOWNER_ID=7\nPAYMENT_MODE=stars\n", encoding="utf-8")
     assert load_settings(env_file=str(env)).owner_id == 7
 
 
@@ -68,6 +68,7 @@ def test_missing_values_exit_naming_each_variable(monkeypatch):
     message = str(info.value)
     assert "BOT_TOKEN is missing" in message
     assert "OWNER_ID is missing" in message
+    assert "PAYMENT_MODE is missing" in message
     assert "DB_PATH" not in message
 
 

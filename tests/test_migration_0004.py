@@ -10,6 +10,11 @@ from bot import db as db_module
 from bot.db import run_migrations
 
 MINIMUM_SQLITE = (3, 35, 0)  # ALTER TABLE ... DROP COLUMN
+NAMES_UPTO_0003 = (
+    "0001_init.sql",
+    "0002_order_item_delivery.sql",
+    "0003_variant_file_name.sql",
+)
 
 
 def _columns(conn, table: str) -> list[str]:
@@ -56,7 +61,11 @@ def test_a_database_at_0003_upgrades_and_preserves_every_other_column(tmp_path: 
         for r in conn.execute("SELECT * FROM customers")
     }
 
-    assert run_migrations(conn, db_module.MIGRATIONS_DIR) == ["0004_drop_customer_language.sql"]
+    upto_0004 = tmp_path / "v4"
+    upto_0004.mkdir()
+    for name in (*NAMES_UPTO_0003, "0004_drop_customer_language.sql"):
+        shutil.copy(db_module.MIGRATIONS_DIR / name, upto_0004)
+    assert run_migrations(conn, upto_0004) == ["0004_drop_customer_language.sql"]
 
     assert "language" not in _columns(conn, "customers")
     assert _columns(conn, "customers") == [
@@ -73,7 +82,7 @@ def test_a_database_at_0003_upgrades_and_preserves_every_other_column(tmp_path: 
     # Rows referencing customers survive and the foreign key still holds.
     assert conn.execute("SELECT user_id FROM orders").fetchone()["user_id"] == 2
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert run_migrations(conn, db_module.MIGRATIONS_DIR) == []  # idempotent
+    assert run_migrations(conn, upto_0004) == []  # idempotent
     conn.close()
 
 
@@ -82,6 +91,9 @@ def test_earlier_migrations_are_untouched_and_checksums_stay_green(empty_db):
         r["version"]: r["checksum"] for r in empty_db.execute("SELECT * FROM schema_migrations")
     }
     assert "0004_drop_customer_language.sql" in rows
+    assert rows["0004_drop_customer_language.sql"] == db_module._checksum(
+        (db_module.MIGRATIONS_DIR / "0004_drop_customer_language.sql").read_text(encoding="utf-8")
+    )
     for name in (
         "0001_init.sql",
         "0002_order_item_delivery.sql",

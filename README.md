@@ -35,8 +35,8 @@ Python 3.11 or newer, and **SQLite 3.35 or newer** — migration 0004 uses `ALTE
      [@userinfobot](https://t.me/userinfobot) and it will reply with your id.
    - **DB_PATH**: leave as `data/shop.db` unless you have a reason to change it.
    - **LOG_LEVEL**: leave as `INFO` unless debugging.
-   - **PAYMENT_MODE**: `mock` (default, demo only) or `stars` — see [Payment modes](#payment-modes).
-   - **SEED_DEMO**: `true` (default) loads a fictional demo catalogue into an empty database.
+   - **PAYMENT_MODE**: required, no default. `.env.example` sets `mock`, a demo mode that grants content without payment and must never run with real content; set `stars` for a real shop — see [Payment modes](#payment-modes).
+   - **SEED_DEMO**: defaults to `false`; `.env.example` sets `true` to load a fictional demo catalogue into an empty database. Turn it off before adding real content.
 
 4. Run the bot:
 
@@ -104,6 +104,7 @@ bot/
   jobs.py          the recurring sweep and /sweep
   payments/        Stars and demo providers, the shared payability check
   limits.py        shared limits (the 25,000 Star order cap)
+  concurrency.py   per-user update processing (see Concurrency)
   tg.py            typed access to optional update fields
   security.py      owner_only decorator
   render.py        HTML escaping and Stars formatting
@@ -116,6 +117,19 @@ bot/
   handlers/        command and callback handlers
 data/              gitignored, created at runtime
 ```
+
+## Concurrency
+
+python-telegram-bot handles updates one at a time by default, so one slow handler would delay everyone, including a payment's `pre_checkout_query`, which Telegram wants answered within 10 seconds. The bot therefore uses `PerUserUpdateProcessor` (`bot/concurrency.py`):
+
+- **Different users run concurrently** (up to 256 updates at once); **one user's updates run strictly in order**, each behind a per-user lock. A slow owner action such as `/sweep` delays only the owner's own later updates, never customers'.
+- **At most 8 updates per user** may be queued or in flight; a flood beyond that is dropped immediately with one INFO line naming only the user id. PTB takes a slot from its shared pool *before* the processor runs (the semaphore is acquired in the final `process_update`, then `do_process_update` is called), so the cap is what stops one user's queued updates from holding pool slots.
+- A `pre_checkout_query` is never dropped and **bypasses the per-user lock**, so it is always answered promptly. That is safe because the handler has no `await` between `check_payable` and `extend_reservation`, and no `await` ever happens while a database transaction is open (both are checked by tests that read the source), so it cannot interleave with another handler's database work.
+- A `successful_payment` is never dropped and **stays inside the lock**, so a user's payment is recorded before any later update of theirs (for example a cancel) is processed.
+
+The bot shares one SQLite connection. That is safe because every database section is synchronous: no `await` appears inside a `with transaction()` / `with immediate_transaction()` block.
+
+**Shutdown.** `Application.stop()` stops fetching updates, then waits for every in-flight update and for every task started with `application.create_task` (including background deliveries) to finish. It does not cancel them and has no timeout. If the process is killed instead, an order whose delivery was interrupted stays `paid`, and the recurring sweep retries it (every minute, with no remembered backoff after a restart) until it is delivered.
 
 ## Design language
 

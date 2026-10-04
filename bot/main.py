@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import logging
 import sys
+import traceback
+from types import TracebackType
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -21,6 +23,7 @@ from telegram.ext import (
 )
 
 from . import jobs, profile, ratelimit
+from .concurrency import PerUserUpdateProcessor
 from .config import get_settings
 from .db import MigrationError, init_db
 from .handlers import (
@@ -61,31 +64,61 @@ def configure_logging() -> None:
     formatter = RedactingFormatter(LOG_FORMAT)
     for handler in root.handlers:
         handler.setFormatter(formatter)
-    root.setLevel(get_settings().log_level)
-    # httpx/httpcore log outgoing request URLs at INFO, and those URLs embed
-    # the bot token — must stay above INFO regardless of LOG_LEVEL.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    level: int = getattr(logging, get_settings().log_level)
+    root.setLevel(level)
+    # Whatever LOG_LEVEL says, these stay quiet:
+    # - httpx/httpcore log outgoing request URLs at INFO, and those URLs embed
+    #   the bot token, so they never go below WARNING;
+    # - telegram logs whole Update objects at DEBUG (message text, pasted
+    #   licence keys, names), so it never goes below INFO.
+    logging.getLogger("httpx").setLevel(max(level, logging.WARNING))
+    logging.getLogger("httpcore").setLevel(max(level, logging.WARNING))
+    logging.getLogger("telegram").setLevel(max(level, logging.INFO))
 
 
 logger = logging.getLogger(__name__)
 
 
+MAX_LOGGED_CALLBACK_BYTES = 64  # Telegram's own callback_data limit
+
+_UPDATE_KINDS = ("callback_query", "pre_checkout_query", "message", "edited_message")
+
+
+def _update_kind(update: object) -> str:
+    if not isinstance(update, Update):
+        return type(update).__name__
+    for kind in _UPDATE_KINDS:
+        if getattr(update, kind, None) is not None:
+            return kind
+    return "other"
+
+
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if isinstance(context.error, IgnoreUpdate):
-        logger.debug("Ignored update: %s", context.error)
+    """Log an unhandled handler error WITHOUT user content: only the exception
+    class and (redacted) message, the update kind, the user id and, for button
+    taps, the callback_data (a bot-built string of at most 64 bytes). Never
+    message text, document names or anything else a user or the owner typed."""
+    error = context.error
+    if isinstance(error, IgnoreUpdate):
+        logger.debug("Ignored update: %s", error)
         return
     user_id = None
-    action = None
+    callback_data = None
     if isinstance(update, Update):
         if update.effective_user:
             user_id = update.effective_user.id
-        if update.callback_query:
-            action = f"callback_data={update.callback_query.data!r}"
-        elif update.message and update.message.text:
-            action = f"message_text={update.message.text!r}"
-    logger.exception(
-        "Unhandled exception (user_id=%s, %s)", user_id, action, exc_info=context.error
+        if update.callback_query and update.callback_query.data:
+            callback_data = update.callback_query.data.encode("utf-8")[
+                :MAX_LOGGED_CALLBACK_BYTES
+            ].decode("utf-8", "ignore")
+    logger.error(
+        "Unhandled %s: %s (update=%s, user_id=%s, callback_data=%r)",
+        type(error).__name__,
+        redact(str(error)),
+        _update_kind(update),
+        user_id,
+        callback_data,
+        exc_info=error,
     )
 
 
@@ -124,6 +157,7 @@ def build_application() -> Application:
         .token(settings.bot_token.get_secret_value())
         .defaults(defaults)
         .post_init(_post_init)
+        .concurrent_updates(PerUserUpdateProcessor())
         .build()
     )
 
@@ -190,9 +224,51 @@ def build_application() -> Application:
     return application
 
 
+def _redacting_excepthook(
+    exc_type: type[BaseException], exc: BaseException, tb: TracebackType | None
+) -> None:
+    """Print an uncaught exception to stderr with anything token-shaped redacted.
+    The interpreter's default hook bypasses the logging formatter, and some
+    library exceptions (an invalid token, a failed request) quote the token."""
+    text = "".join(traceback.format_exception(exc_type, exc, tb))
+    sys.stderr.write(redact(text))
+
+
+def install_excepthook() -> None:
+    sys.excepthook = _redacting_excepthook
+
+
+def _log_critical_redacted(exc: BaseException) -> None:
+    """Log a fatal startup/polling error through the (redacted) logging system.
+    The traceback is formatted here and redacted before it is logged, so no
+    handler (not even one without the redacting formatter) ever sees a token."""
+    if not logging.getLogger().handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(RedactingFormatter(LOG_FORMAT))
+        logging.getLogger().addHandler(handler)
+    detail = redact("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+    logger.critical("Fatal error, shutting down:\n%s", detail)
+
+
 def main() -> None:
+    install_excepthook()  # first of all: before config is even read
+    try:
+        _run()
+    except Exception as exc:
+        _log_critical_redacted(exc)
+        raise SystemExit(1) from None
+
+
+def _run() -> None:
     settings = get_settings()
     configure_logging()
+    if settings.payment_mode == "mock":
+        logger.warning(
+            "DEMO MODE: Pay (demo) grants real content without payment. "
+            "Never run this mode with real content."
+        )
+    else:
+        logger.info("Payment mode: %s", settings.payment_mode)
     logger.info("Initializing database at %s", settings.db_path)
     try:
         init_db()

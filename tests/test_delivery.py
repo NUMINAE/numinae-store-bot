@@ -314,12 +314,20 @@ async def test_overlapping_deliveries_send_each_item_exactly_once(db):
     bot.send_message.side_effect = slow_send
 
     first = asyncio.ensure_future(delivery.deliver_order(bot, order_id))
-    await asyncio.wait_for(entered.wait(), timeout=2)
-    second = await delivery.deliver_order(bot, order_id)  # overlaps the running one
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        try:
+            # The guard returns at once. Without it this call would block on the gate
+            # behind the first one, so the short timeout turns a missing guard into a
+            # fast failure rather than a hang.
+            second = await asyncio.wait_for(delivery.deliver_order(bot, order_id), timeout=1)
+        except TimeoutError:
+            pytest.fail("the overlapping call did not return at once: the in-flight guard is gone")
+    finally:
+        gate.set()
 
     assert second == ([], [])  # returned at once, sent nothing
     assert len(bot.send_message.await_args_list) == 1  # only the first call's first item so far
-    gate.set()
     result = await first
     assert len(result.delivered) == 2 and result.failed == []
     texts = _texts(bot)

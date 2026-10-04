@@ -17,6 +17,7 @@ OWNER_ID = 1
 os.environ["BOT_TOKEN"] = "test-token-not-real"
 os.environ["OWNER_ID"] = str(OWNER_ID)
 os.environ["LOG_LEVEL"] = "WARNING"
+os.environ["PAYMENT_MODE"] = "mock"  # required, no default; tests that need stars set it
 
 from bot import db as db_module  # noqa: E402 - env vars must be set before bot is imported
 from bot import ratelimit  # noqa: E402 - env vars must be set before bot is imported

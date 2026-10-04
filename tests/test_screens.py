@@ -20,6 +20,7 @@ from .conftest import OWNER_ID
 from .flow import Flow
 from .helpers import add_customer
 from .screens import (
+    CRAWL_BOUND,
     TELEGRAM_TEXT_LIMIT,
     crawl,
     markup_problems,
@@ -105,7 +106,7 @@ async def test_the_customer_crawler_finds_no_dead_ends(db, monkeypatch):
     _, result = await _crawl_as(monkeypatch, USER, "menu:show")
     print(f"customer crawl: {result.count} screens, {result.taps} taps")
     assert not result.problems, NL.join(result.problems)
-    assert result.exhausted and result.count >= MIN_SCREENS
+    assert result.exhausted and MIN_SCREENS <= result.count < CRAWL_BOUND
 
 
 async def test_the_owner_crawler_finds_no_dead_ends(db, monkeypatch):
@@ -113,7 +114,7 @@ async def test_the_owner_crawler_finds_no_dead_ends(db, monkeypatch):
     _, result = await _crawl_as(monkeypatch, OWNER_ID, "adm:home")
     print(f"owner crawl: {result.count} screens, {result.taps} taps")
     assert not result.problems, NL.join(result.problems)
-    assert result.exhausted and result.count >= MIN_SCREENS
+    assert result.exhausted and MIN_SCREENS <= result.count < CRAWL_BOUND
 
 
 async def test_the_crawler_under_hostile_content_stays_under_the_limit(db, monkeypatch):
@@ -121,7 +122,7 @@ async def test_the_crawler_under_hostile_content_stays_under_the_limit(db, monke
     flow, result = await _crawl_as(monkeypatch, USER, "menu:show")
     print(f"hostile customer crawl: {result.count} screens, {result.taps} taps")
     assert not result.problems, NL.join(result.problems)
-    assert result.exhausted and result.count >= MIN_SCREENS
+    assert result.exhausted and MIN_SCREENS <= result.count < CRAWL_BOUND
     longest = max(len(text) for _, text in result.screens)
     assert longest < TELEGRAM_TEXT_LIMIT
     assert flow.context.bot.send_message.await_count > 0  # deliveries and summaries were checked
@@ -132,7 +133,7 @@ async def test_the_owner_crawler_under_hostile_content_stays_under_the_limit(db,
     _, result = await _crawl_as(monkeypatch, OWNER_ID, "adm:home")
     print(f"hostile owner crawl: {result.count} screens, {result.taps} taps")
     assert not result.problems, NL.join(result.problems)
-    assert result.exhausted and result.count >= MIN_SCREENS
+    assert result.exhausted and MIN_SCREENS <= result.count < CRAWL_BOUND
 
 
 def test_the_checker_itself_catches_what_it_is_for():

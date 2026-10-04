@@ -1,13 +1,25 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "numinae-store"
 version = "0.1.0"
-description = "Telegram shop bot"
+description = "A Telegram storefront for digital goods, paid with Telegram Stars"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "NUMINAE" }]
 requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Communications :: Chat",
+]
 dependencies = [
     "python-telegram-bot[job-queue]>=22.8,<23",
     "pydantic>=2,<3",
@@ -39,8 +51,9 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP", "SIM", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests use bare asserts and obviously fake credentials.
-"tests/**" = ["S101", "S105", "S106"]
+# Tests use bare asserts and obviously fake credentials, and run the bot's own
+# interpreter (sys.executable) with fixed arguments in subprocesses (S603).
+"tests/**" = ["S101", "S105", "S106", "S603"]
 # Customer-facing prose; the strings are single literals the formatter cannot wrap.
 "bot/i18n.py" = ["E501"]
 

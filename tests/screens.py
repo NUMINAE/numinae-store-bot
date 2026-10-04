@@ -20,6 +20,9 @@ from bot.ui_kit import HOME_CALLBACK, ICON, NOOP_CALLBACK
 from .flow import Flow
 
 TELEGRAM_TEXT_LIMIT = 4096
+# A safety bound only: a navigation loop must never hang CI. The crawls finish far
+# below it (they stop when every reachable button has been tapped).
+CRAWL_BOUND = 5000
 CALLBACK_BYTE_LIMIT = 64
 EXPIRED_ALERT = "This menu has expired."
 ALLOWED_TAGS = {"b", "code", "s", "i"}
@@ -134,7 +137,7 @@ class CrawlResult:
         return len(self.screens)
 
 
-async def crawl(flow: Flow, start: str, *, limit: int = 1000) -> CrawlResult:
+async def crawl(flow: Flow, start: str, *, limit: int = CRAWL_BOUND) -> CrawlResult:
     """Breadth-first: tap `start`, then every button on every screen found, once
     per distinct callback_data. Read-only buttons first; state-changing ones last.
     Every screen is checked; a button that answers "menu expired", or does

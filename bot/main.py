@@ -22,7 +22,7 @@ from telegram.ext import (
     filters,
 )
 
-from . import jobs, profile, ratelimit
+from . import health, jobs, profile, ratelimit
 from .concurrency import PerUserUpdateProcessor
 from .config import get_settings
 from .db import MigrationError, init_db
@@ -250,8 +250,13 @@ def _log_critical_redacted(exc: BaseException) -> None:
     logger.critical("Fatal error, shutting down:\n%s", detail)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     install_excepthook()  # first of all: before config is even read
+    # --check-config / --healthcheck are answered here, before any logging setup,
+    # database access or network call.
+    exit_code = health.handle_flags([] if argv is None else argv)
+    if exit_code is not None:
+        raise SystemExit(exit_code)
     try:
         _run()
     except Exception as exc:
@@ -283,4 +288,4 @@ def _run() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

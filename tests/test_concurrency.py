@@ -250,13 +250,12 @@ async def test_a_flood_of_50_is_capped_at_8_and_another_user_is_still_processed_
 
     assert rec.log.count("start:f0") == 1 and "end:b1" in rec.log
     assert processor.pending_for(FLOODER) == 8  # the first plus seven queued; 42 dropped
-    dropped = [r for r in caplog.records if "Dropped an update" in r.getMessage()]
-    assert len(dropped) == 42
-    assert all(r.levelno == logging.INFO for r in dropped)
-    assert all(
-        r.getMessage() == f"Dropped an update: user {FLOODER} is over the per-user limit"
-        for r in dropped
-    )  # the user id and nothing else
+    dropped = [r for r in caplog.records if "Dropped" in r.getMessage()]
+    assert len(dropped) == 1  # 42 drops, one line: not one line per dropped update
+    assert dropped[0].levelno == logging.INFO
+    assert dropped[0].getMessage() == (
+        f"Dropped 1 update(s) from user {FLOODER} (over the per-user limit) since the last report"
+    )  # the user id and a count, nothing else
 
     rec.gate("f0").set()
     await asyncio.wait_for(asyncio.gather(*flood), timeout=2)
@@ -304,8 +303,7 @@ async def test_a_flooders_pre_checkout_and_successful_payment_are_processed_not_
     rec.gate("f0").set()
     await asyncio.wait_for(asyncio.gather(paid, *flood), timeout=2)
     assert "end:payment" in rec.log  # never dropped: processed after the earlier updates
-    dropped_names = [r.getMessage() for r in caplog.records if "Dropped" in r.getMessage()]
-    assert len(dropped_names) == 22  # 30 ordinary - 8 admitted; the payments were not among them
+    assert processor._drops[FLOODER].dropped + 1 == 22  # 30 ordinary - 8 admitted (1 reported)
 
 
 # --- c: pre_checkout bypasses the user's own lock ----------------------------------------------
@@ -398,3 +396,122 @@ async def test_a_double_tapped_refund_refunds_once(db):
     assert orders_repo.get(order_id)["status"] == "refunded"
     assert key_states(db) == {"available": 8, "revoked": 2}
     assert processor.tracked_users == 0
+
+
+# --- A2: drops are logged in aggregate -----------------------------------------------------------
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def _drop_many(processor, user_id: int, count: int) -> None:
+    for n in range(count):
+        await processor.process_update(message_update(user_id), Recorder().run(f"d{n}"))
+
+
+def _reports(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if "Dropped" in r.getMessage()]
+
+
+async def test_fifty_drops_in_one_window_give_one_line_then_the_next_window_reports_the_rest(
+    caplog,
+):
+    caplog.set_level(logging.INFO, logger="bot.concurrency")
+    clock = Clock()
+    processor = PerUserUpdateProcessor(max_per_user=1, clock=clock)
+    rec = Recorder()
+    holder = submit(processor, message_update(A), rec.run("holder", hold=True))
+    await spin()
+
+    await _drop_many(processor, A, 50)  # all within the same instant
+    assert _reports(caplog) == [
+        f"Dropped 1 update(s) from user {A} (over the per-user limit) since the last report"
+    ]  # the first drop is reported at once; the other 49 are only counted
+
+    clock.now += 30  # still inside the window: nothing new
+    await _drop_many(processor, A, 5)
+    assert len(_reports(caplog)) == 1
+
+    clock.now += 31  # the window has passed: one more line with everything since the last
+    await _drop_many(processor, A, 1)
+    assert _reports(caplog)[1] == (
+        f"Dropped 55 update(s) from user {A} (over the per-user limit) since the last report"
+    )  # 49 + 5 + 1
+    assert len(_reports(caplog)) == 2
+
+    rec.gate("holder").set()
+    await holder
+
+
+async def test_users_are_reported_independently(caplog):
+    caplog.set_level(logging.INFO, logger="bot.concurrency")
+    clock = Clock()
+    processor = PerUserUpdateProcessor(max_per_user=1, clock=clock)
+    rec = Recorder()
+    first = submit(processor, message_update(A), rec.run("a", hold=True))
+    second = submit(processor, message_update(B), rec.run("b", hold=True))
+    await spin()
+    await _drop_many(processor, A, 3)
+    await _drop_many(processor, B, 3)
+    lines = _reports(caplog)
+    assert len(lines) == 2 and f"user {A}" in lines[0] and f"user {B}" in lines[1]
+    rec.gate("a").set()
+    rec.gate("b").set()
+    await asyncio.gather(first, second)
+
+
+async def test_drops_counted_when_a_flood_stops_are_reported_later_not_lost(caplog):
+    caplog.set_level(logging.INFO, logger="bot.concurrency")
+    clock = Clock()
+    processor = PerUserUpdateProcessor(max_per_user=1, clock=clock)
+    rec = Recorder()
+    holder_a = submit(processor, message_update(A), rec.run("a", hold=True))
+    holder_b = submit(processor, message_update(B), rec.run("b", hold=True))
+    await spin()
+    await _drop_many(processor, A, 10)  # 1 reported, 9 pending, then A goes quiet
+    clock.now += 61
+    await _drop_many(processor, B, 1)  # a later drop by someone else flushes A's remainder
+    assert any(f"Dropped 9 update(s) from user {A}" in line for line in _reports(caplog))
+    rec.gate("a").set()
+    rec.gate("b").set()
+    await asyncio.gather(holder_a, holder_b)
+
+
+async def test_the_drop_map_is_pruned_and_shutdown_reports_the_remainder(caplog):
+    caplog.set_level(logging.INFO, logger="bot.concurrency")
+    clock = Clock()
+    processor = PerUserUpdateProcessor(max_per_user=1, clock=clock)
+    rec = Recorder()
+    holder = submit(processor, message_update(A), rec.run("a", hold=True))
+    await spin()
+    await _drop_many(processor, A, 4)
+    await processor.shutdown()
+    assert f"Dropped 3 update(s) from user {A}" in "\n".join(_reports(caplog))
+    assert processor._drops == {}
+
+    clock.now += 500
+    await _drop_many(processor, A, 1)  # rebuilt after a shutdown flush
+    clock.now += 500
+    await _drop_many(processor, B, 1)  # B's drop prunes A's long-quiet entry
+    assert A not in processor._drops or processor._drops[A].dropped == 0
+    rec.gate("a").set()
+    await holder
+
+
+async def test_the_drop_report_never_contains_update_content(caplog):
+    caplog.set_level(logging.DEBUG, logger="bot.concurrency")
+    processor = PerUserUpdateProcessor(max_per_user=1, clock=Clock())
+    rec = Recorder()
+    holder = submit(processor, message_update(A), rec.run("a", hold=True))
+    await spin()
+    update = message_update(A)
+    update.message = SimpleNamespace(text="SECRET-TEXT", successful_payment=None)
+    await processor.process_update(update, rec.run("x"))
+    assert "SECRET-TEXT" not in caplog.text
+    rec.gate("a").set()
+    await holder

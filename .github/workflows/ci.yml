@@ -3,19 +3,26 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    # Weekly, so new advisories against our dependencies are caught without a push.
+    - cron: "23 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  check:
+  quality:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: Install
@@ -26,18 +33,90 @@ jobs:
         run: ruff format --check .
       - name: Mypy
         run: mypy
+
+  test:
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev]"
       - name: Tests
         run: pytest --cov --cov-fail-under=0
       - name: Coverage (80% outside handlers)
         run: coverage report --omit="bot/handlers/*" --fail-under=80
       - name: Coverage (60% in handlers)
         run: coverage report --include="bot/handlers/*" --fail-under=60
-      - name: Wheel contains migrations
+
+  audit:
+    # Also runs weekly (see the schedule above).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the project and pip-audit
+        run: pip install . pip-audit
+      - name: Audit installed dependencies
+        # Exits non-zero on any known vulnerability.
+        run: pip-audit --skip-editable
+
+  package:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      # Dummy, non-secret values: they only let the config load. They are passed to the
+      # container by name (-e NAME), so no value appears in a command line or the log.
+      BOT_TOKEN: dummy-token-not-real
+      OWNER_ID: "1"
+      PAYMENT_MODE: mock
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
         run: |
-          pip wheel . --no-deps -w dist-check
+          pip install build
+          python -m build --wheel --outdir dist-check
+      - name: The wheel contains the migrations, the demo seed and the new modules
+        run: |
           python - <<'PY'
           import glob, zipfile
           names = zipfile.ZipFile(glob.glob("dist-check/*.whl")[0]).namelist()
           assert any(n.startswith("bot/migrations/") and n.endswith(".sql") for n in names), names
           assert "bot/seed_demo.json" in names, names
+          for module in ("concurrency", "health", "backup", "dbpath"):
+              assert f"bot/{module}.py" in names, module
           PY
+      - name: Build the Docker image (not pushed)
+        run: docker build --tag numinae-store:ci .
+      - name: The image runs as uid 10001
+        run: |
+          uid="$(docker run --rm --entrypoint id numinae-store:ci -u)"
+          test "$uid" = "10001"
+      - name: --check-config in the image prints one line and exits 0
+        run: |
+          out="$(docker run --rm -e BOT_TOKEN -e OWNER_ID -e PAYMENT_MODE \
+            numinae-store:ci python -m bot.main --check-config)"
+          test "$out" = "config ok, mode=mock"
+          case "$out" in *"$BOT_TOKEN"*) echo "secret in output" >&2; exit 1;; esac
+      - name: --healthcheck with no data volume fails with "no heartbeat"
+        run: |
+          set +e
+          out="$(docker run --rm numinae-store:ci python -m bot.main --healthcheck)"
+          code=$?
+          set -e
+          test "$code" -eq 1
+          test "$out" = "no heartbeat"

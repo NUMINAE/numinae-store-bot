@@ -23,7 +23,7 @@ from typing import NamedTuple
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from . import delivery
+from . import delivery, health
 from .handlers.payments import alert_owner, safe_send
 from .i18n import t
 from .keyboards import cb
@@ -182,6 +182,11 @@ async def _alert_if_stuck(bot: Bot, order_id: int) -> None:
 
 async def sweep_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """The recurring job. Never raises: a crash here would stop the schedule."""
+    # First thing, in its own guard: even a pass that fails proves the loop is alive.
+    try:
+        health.touch_heartbeat()
+    except Exception:
+        logger.warning("Heartbeat update failed", exc_info=True)
     try:
         report = await run_sweep(context.bot)
         logger.info(

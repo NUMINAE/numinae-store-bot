@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -37,12 +38,19 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_CONCURRENT_UPDATES = 256
 DEFAULT_MAX_PER_USER = 8
+DROP_REPORT_SECONDS = 60.0  # at most one log line per user per this long
 
 
 @dataclass
 class _UserState:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     active: int = 0  # this user's updates that are queued or in flight
+
+
+@dataclass
+class _DropState:
+    dropped: int = 0  # dropped since the last report
+    last_report: float | None = None  # None until the first report
 
 
 def _user_id(update: object) -> int | None:
@@ -64,6 +72,7 @@ class PerUserUpdateProcessor(BaseUpdateProcessor):
         self,
         max_concurrent_updates: int = DEFAULT_MAX_CONCURRENT_UPDATES,
         max_per_user: int = DEFAULT_MAX_PER_USER,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         super().__init__(max_concurrent_updates)
         if max_per_user < 1:
@@ -72,6 +81,9 @@ class PerUserUpdateProcessor(BaseUpdateProcessor):
         # user id -> state. An entry exists only while that user has an update
         # queued or in flight, so the map is empty when the bot is idle.
         self._users: dict[int, _UserState] = {}
+        self._clock = clock
+        # Drops are reported in aggregate, not one log line per dropped update.
+        self._drops: dict[int, _DropState] = {}
 
     @property
     def tracked_users(self) -> int:
@@ -97,7 +109,7 @@ class PerUserUpdateProcessor(BaseUpdateProcessor):
         if state is None:
             state = self._users[user_id] = _UserState()
         if state.active >= self._max_per_user and not exempt:
-            logger.info("Dropped an update: user %s is over the per-user limit", user_id)
+            self._record_drop(user_id)
             close = getattr(coroutine, "close", None)
             if close is not None:
                 close()  # never awaited: silence "coroutine was never awaited"
@@ -122,8 +134,47 @@ class PerUserUpdateProcessor(BaseUpdateProcessor):
             if state.active == 0 and self._users.get(user_id) is state:
                 del self._users[user_id]
 
+    def _record_drop(self, user_id: int) -> None:
+        """Count a dropped update and log at most one line per user per
+        DROP_REPORT_SECONDS: the user id and how many were dropped since the last
+        line. Never any update content. The first drop is reported at once."""
+        now = self._clock()
+        self._report_stale(now, skip=user_id)
+        state = self._drops.setdefault(user_id, _DropState())
+        state.dropped += 1
+        if state.last_report is None or now - state.last_report >= DROP_REPORT_SECONDS:
+            self._report(user_id, state, now)
+
+    def _report(self, user_id: int, state: _DropState, now: float) -> None:
+        logger.info(
+            "Dropped %d update(s) from user %s (over the per-user limit) since the last report",
+            state.dropped,
+            user_id,
+        )
+        state.dropped = 0
+        state.last_report = now
+
+    def _report_stale(self, now: float, skip: int | None = None) -> None:
+        """Report drops that were counted but never reported because the flood
+        stopped, and forget users that have been quiet for a whole window, so this
+        map cannot grow without bound."""
+        for user_id, state in list(self._drops.items()):
+            if user_id == skip or state.last_report is None:
+                continue
+            if now - state.last_report < DROP_REPORT_SECONDS:
+                continue
+            if state.dropped:
+                self._report(user_id, state, now)
+            else:
+                del self._drops[user_id]
+
     async def initialize(self) -> None:
         """Nothing to allocate."""
 
     async def shutdown(self) -> None:
-        """Nothing to release."""
+        """Report any drops not yet logged."""
+        now = self._clock()
+        for user_id, state in list(self._drops.items()):
+            if state.dropped:
+                self._report(user_id, state, now)
+        self._drops.clear()

@@ -1,0 +1,41 @@
+# Run exactly ONE instance of this service. Two bots polling with the same token fight
+# over getUpdates (Telegram answers one of them with a conflict error), and the
+# per-process guards (rate limiting, in-flight delivery and refund guards, the
+# per-user update processor) do not coordinate between processes.
+#
+#   docker compose up -d --build
+#   docker compose exec bot python -m bot.backup     # back up the running database
+
+services:
+  bot:
+    build: .
+    image: numinae-store:0.1.0
+    # BOT_TOKEN, OWNER_ID and PAYMENT_MODE come from .env (copy .env.example). The file
+    # is read by Compose at run time and is never copied into the image.
+    env_file: .env
+    volumes:
+      # The database, its WAL files, the heartbeat and backups live here. A named volume
+      # inherits the ownership of /app/data from the image (uid 10001).
+      - numinae-data:/app/data
+    # Come back after a crash or a reboot, but not after an explicit `docker compose stop`.
+    restart: unless-stopped
+    # A tiny init process as PID 1: forwards signals and reaps zombies.
+    init: true
+    # `docker stop` sends SIGTERM, which starts python-telegram-bot's graceful stop: it
+    # drains queued updates and background deliveries. It does not cancel them and has
+    # no timeout of its own, so give it time. After this period Docker sends SIGKILL.
+    stop_grace_period: 30s
+    # The root filesystem is immutable; only the data volume and /tmp are writable.
+    read_only: true
+    tmpfs:
+      - /tmp
+    # No Linux capabilities are needed to poll Telegram and write to one directory.
+    cap_drop:
+      - ALL
+    # The process can never gain privileges, even through a setuid binary.
+    security_opt:
+      - no-new-privileges:true
+    # No ports are published: the bot only makes outgoing connections to Telegram.
+
+volumes:
+  numinae-data:

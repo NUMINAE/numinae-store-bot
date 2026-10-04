@@ -1,0 +1,36 @@
+# Keep the build context small and free of anything private.
+.git
+.github
+.gitignore
+.venv
+venv
+env
+.env
+.env.*
+!.env.example
+data
+backups
+*.db
+*.db-wal
+*.db-shm
+__pycache__
+*.pyc
+*.egg-info
+build
+dist
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+.claude
+# The tests are not needed in the image.
+tests
+CLAUDE.md
+CONTRIBUTING.md
+SECURITY.md
+CHANGELOG.md
+docker-compose.yml
+Dockerfile
+.dockerignore
+.pre-commit-config.yaml

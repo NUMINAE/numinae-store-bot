@@ -33,7 +33,7 @@ def test_spaces_inside_a_key_are_allowed():
 
 
 def test_unicode_keys_are_fine():
-    assert parse_keys("ключ-é-日本").valid == ["ключ-é-日本"]
+    assert parse_keys("κλειδί-é-日本").valid == ["κλειδί-é-日本"]
 
 
 def test_hostile_strings_are_just_data():

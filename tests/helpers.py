@@ -10,6 +10,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 from telegram import InlineKeyboardMarkup
 
+from bot.ui_kit import ICON
+
+HOME = f"{ICON.home} Home"  # the label of the nav row's Home button
+
 
 def make_user(user_id: int, first_name: str | None = "Test", username: str | None = None) -> Any:
     return SimpleNamespace(id=user_id, first_name=first_name, username=username)

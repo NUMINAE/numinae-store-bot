@@ -4,13 +4,16 @@ bot/stats.py."""
 
 from __future__ import annotations
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from ..keyboards import cb
 from ..render import bold, esc, stars
 from ..stats import STATUSES, ModeStats, Stats, build_stats
 from ..ui import show_screen
+from ..ui_kit import ICON, SEP_META, SEP_PRICE, nav_row, screen, trim
+
+EDITION_BUDGET = 123  # a product name and an edition label, trimmed
 
 _MODE_TITLES = {
     "stars": "Real money (Telegram Stars)",
@@ -19,7 +22,10 @@ _MODE_TITLES = {
 
 
 def _money(label: str, gross: int, refunded: int, net: int) -> str:
-    return f"{label}: gross {stars(gross)} · refunded {stars(refunded)} · net {stars(net)}"
+    return (
+        f"{label}: gross {stars(gross)}{SEP_META}refunded {stars(refunded)}"
+        f"{SEP_META}net {stars(net)}"
+    )
 
 
 def _mode_section(mode: str, data: ModeStats) -> list[str]:
@@ -31,7 +37,7 @@ def _mode_section(mode: str, data: ModeStats) -> list[str]:
     ]
     if data.top_editions:
         lines += [
-            f"{rank}. {esc(edition.label)} — {edition.units}"
+            f"{rank}. {esc(trim(edition.label, EDITION_BUDGET))}{SEP_PRICE}{edition.units}"
             for rank, edition in enumerate(data.top_editions, start=1)
         ]
     else:
@@ -40,7 +46,7 @@ def _mode_section(mode: str, data: ModeStats) -> list[str]:
 
 
 def render_stats(stats: Stats) -> str:
-    lines = [bold("Stats"), ""]
+    lines: list[str] = []
     for mode in ("stars", "mock"):
         lines += _mode_section(mode, stats.modes[mode]) + [""]
     lines.append(bold("Orders by status"))
@@ -51,11 +57,9 @@ def render_stats(stats: Stats) -> str:
         "",
         f"Customers: {stats.customers_total} total, {stats.customers_new_7d} new in 7 days",
     ]
-    return "\n".join(lines)
+    return screen(ICON.stats, "Stats", "\n".join(lines), crumbs=["Admin"])
 
 
 async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Back to admin", callback_data=cb("adm", "home"))]]
-    )
+    keyboard = InlineKeyboardMarkup([nav_row(back=cb("adm", "home"))])
     await show_screen(update, context, text=render_stats(build_stats()), keyboard=keyboard)

@@ -1,6 +1,9 @@
 """Catalogue browsing: category list -> product list -> product card (editions)
 -> edition screen -> add to cart. Registered under the "cat:" callback
-namespace and routed by action word."""
+namespace and routed by action word.
+
+Every screen is ui_kit.screen() text plus a keyboard that ends with nav_row().
+Admin-entered text (names, descriptions) is trimmed raw and escaped once."""
 
 from __future__ import annotations
 
@@ -9,33 +12,50 @@ import sqlite3
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from ..i18n import t
+from ..i18n import t, tn
 from ..keyboards import cb, parse_callback, parse_cb_id
-from ..render import bold, esc, stars
+from ..render import esc, stars
 from ..repo import cart, categories
 from ..repo import products as products_repo
 from ..tg import require_data, require_query, require_user
 from ..ui import show_screen
-from .common import get_lang, touch_customer
+from ..ui_kit import (
+    ICON,
+    SEP_PRICE,
+    btn_label,
+    delivery_icon,
+    fit_lines,
+    nav_row,
+    pager,
+    screen,
+    trim,
+    trim_escaped,
+)
+from .common import touch_customer
 
 PAGE_SIZE = 5
 MIN_QTY = 1
+MAX_EDITIONS_SHOWN_CAP = 40  # keeps the keyboard well inside Telegram's limits
+DESCRIPTION_BUDGET = 900  # escaped characters
+EDITION_LINES_BUDGET = 1600  # escaped characters
+NAME_BUDGET = 60
+BUTTON_WIDTH = 56
 
 
-def delivery_label(delivery_kind: str, lang: str) -> str:
-    return t(f"delivery.{delivery_kind}", lang)
+def delivery_label(delivery_kind: str) -> str:
+    return t(f"delivery.{delivery_kind}")
 
 
-def _cart_label(user_id: int, lang: str) -> str:
+def _cart_label(user_id: int) -> str:
     item_count, _ = cart.summary(user_id)
-    return (
-        t("common.my_cart_count", lang, count=item_count)
-        if item_count
-        else t("common.my_cart_button", lang)
-    )
+    return t("common.my_cart_count", count=item_count) if item_count else t("common.my_cart_button")
 
 
-def unavailable_alert(variant: sqlite3.Row | None, lang: str) -> str:
+def _cart_button(user_id: int) -> InlineKeyboardButton:
+    return InlineKeyboardButton(_cart_label(user_id), callback_data=cb("cart", "view"))
+
+
+def unavailable_alert(variant: sqlite3.Row | None) -> str:
     """Why a customer can't buy this edition: sold out (a key edition whose
     stock ran out while everything above it is active) or simply gone."""
     if (
@@ -46,14 +66,19 @@ def unavailable_alert(variant: sqlite3.Row | None, lang: str) -> str:
         and variant["product_is_active"]
         and variant["category_is_active"]
     ):
-        return t("catalogue.out_of_stock_alert", lang)
-    return t("catalogue.item_unavailable_alert", lang)
+        return t("catalogue.out_of_stock_alert")
+    return t("catalogue.item_unavailable_alert")
 
 
 def _is_stepper_edition(variant: sqlite3.Row) -> bool:
     """Only key editions have a quantity stepper; file and text editions are
     one per customer."""
     return bool(variant["delivery_kind"] == "key")
+
+
+def _edition_button_label(v: sqlite3.Row) -> str:
+    label = f"{trim(v['label'], NAME_BUDGET)}{SEP_PRICE}{stars(v['price_stars'])}"
+    return btn_label(label, BUTTON_WIDTH)
 
 
 # ---------------------------------------------------------------------------
@@ -66,37 +91,25 @@ async def show_categories(
 ) -> None:
     touch_customer(update)
     user_id = require_user(update).id
-    lang = get_lang(user_id)
 
     cats = categories.list_active()
     if not cats:
-        keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        t("common.back_to_menu_button", lang), callback_data=cb("menu", "show")
-                    )
-                ]
-            ]
-        )
-        await show_screen(
-            update, context, text=t("catalogue.no_stock", lang), keyboard=keyboard, alert=alert
-        )
+        text = screen(ICON.browse, t("catalogue.heading"), esc(t("catalogue.no_stock")))
+        keyboard = InlineKeyboardMarkup([nav_row()])
+        await show_screen(update, context, text=text, keyboard=keyboard, alert=alert)
         return
 
     buttons = [
-        [InlineKeyboardButton(c["name"], callback_data=cb("cat", "cat", c["id"], 0))] for c in cats
-    ]
-    buttons.append(
         [
-            InlineKeyboardButton(_cart_label(user_id, lang), callback_data=cb("cart", "view")),
             InlineKeyboardButton(
-                t("common.back_to_menu_button", lang), callback_data=cb("menu", "show")
-            ),
+                btn_label(c["name"], BUTTON_WIDTH), callback_data=cb("cat", "cat", c["id"], 0)
+            )
         ]
-    )
-
-    text = f"{bold(t('catalogue.heading', lang))}\n\n{t('catalogue.choose_category', lang)}"
+        for c in cats
+    ]
+    buttons.append([_cart_button(user_id)])
+    buttons.append(nav_row())
+    text = screen(ICON.browse, t("catalogue.heading"), esc(t("catalogue.choose_category")))
     await show_screen(
         update, context, text=text, keyboard=InlineKeyboardMarkup(buttons), alert=alert
     )
@@ -112,7 +125,6 @@ async def show_products(
 ) -> None:
     touch_customer(update)
     user_id = require_user(update).id
-    lang = get_lang(user_id)
 
     category = categories.get(category_id)
     if category is None or not category["is_active"]:
@@ -131,31 +143,24 @@ async def show_products(
     buttons = []
     for p in rows:
         price_hint = (
-            t("catalogue.price_from", lang, price=stars(p["min_price_stars"]))
+            t("catalogue.price_from", price=stars(p["min_price_stars"]))
             if p["min_price_stars"] is not None
             else ""
         )
-        label = f"{p['name']}{price_hint}"
+        label = btn_label(f"{trim(p['name'], NAME_BUDGET)}{price_hint}", BUTTON_WIDTH)
         buttons.append([InlineKeyboardButton(label, callback_data=cb("cat", "p", p["id"], page))])
+    pager_row = pager(page, total_pages, lambda n: cb("cat", "cat", category_id, n))
+    if pager_row:
+        buttons.append(pager_row)
+    buttons.append([_cart_button(user_id)])
+    buttons.append(nav_row(back=cb("cat", "cats")))
 
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton("◀", callback_data=cb("cat", "cat", category_id, page - 1)))
-    nav.append(InlineKeyboardButton(f"Page {page + 1}/{total_pages}", callback_data="noop"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("▶", callback_data=cb("cat", "cat", category_id, page + 1)))
-    buttons.append(nav)
-
-    buttons.append(
-        [
-            InlineKeyboardButton(_cart_label(user_id, lang), callback_data=cb("cart", "view")),
-            InlineKeyboardButton(
-                t("catalogue.back_to_categories", lang), callback_data=cb("cat", "cats")
-            ),
-        ]
+    text = screen(
+        ICON.browse,
+        trim(category["name"], NAME_BUDGET),
+        esc(t("catalogue.tap_to_view")),
+        crumbs=[t("catalogue.heading")],
     )
-
-    text = f"{bold(category['name'])}\n\n{t('catalogue.tap_to_view', lang)}"
     await show_screen(update, context, text=text, keyboard=InlineKeyboardMarkup(buttons))
 
 
@@ -173,41 +178,50 @@ async def show_product_card(
 ) -> None:
     touch_customer(update)
     user_id = require_user(update).id
-    lang = get_lang(user_id)
 
     product = products_repo.get(product_id)
     if product is None:
         await show_categories(update, context, alert=alert)
         return
 
-    editions = products_repo.list_variants(product_id)
+    category = categories.get(product["category_id"])
+    all_editions = products_repo.list_variants(product_id)
+    total_editions = len(all_editions)
+    editions = all_editions[:MAX_EDITIONS_SHOWN_CAP]
+    edition_lines = [
+        f"{delivery_icon(v['delivery_kind'])} {esc(trim(v['label'], NAME_BUDGET))}"
+        f"{SEP_PRICE}{stars(v['price_stars'])}"
+        for v in editions
+    ]
+    line_texts, _ = fit_lines(edition_lines, EDITION_LINES_BUDGET)
+    shown = editions[: len(line_texts)]
 
-    lines = [bold(product["name"])]
+    parts: list[str] = []
     if product["description"]:
-        lines.append(esc(product["description"]))
+        parts.append(esc(trim_escaped(product["description"], DESCRIPTION_BUDGET)))
     if not editions:
-        lines.append(t("catalogue.no_editions", lang))
-    text = "\n\n".join(lines)
+        parts.append(esc(t("catalogue.no_editions")))
+    else:
+        parts.append("\n".join(line_texts))
+        if total_editions > len(shown):
+            parts.append(esc(tn("catalogue.more_editions", total_editions - len(shown))))
+    crumbs = [t("catalogue.heading")]
+    if category is not None:
+        crumbs.append(trim(category["name"], NAME_BUDGET))
+    text = screen(
+        ICON.browse, trim(product["name"], NAME_BUDGET), "\n\n".join(parts), crumbs=crumbs
+    )
 
     buttons = [
         [
             InlineKeyboardButton(
-                f"{v['label']} — {stars(v['price_stars'])}",
-                callback_data=cb("cat", "v", v["id"], page),
+                _edition_button_label(v), callback_data=cb("cat", "v", v["id"], page)
             )
         ]
-        for v in editions
+        for v in shown
     ]
-    buttons.append(
-        [
-            InlineKeyboardButton(
-                t("catalogue.back_to_products", lang),
-                callback_data=cb("cat", "cat", product["category_id"], page),
-            ),
-            InlineKeyboardButton(_cart_label(user_id, lang), callback_data=cb("cart", "view")),
-        ]
-    )
-
+    buttons.append([_cart_button(user_id)])
+    buttons.append(nav_row(back=cb("cat", "cat", product["category_id"], page)))
     await show_screen(
         update, context, text=text, keyboard=InlineKeyboardMarkup(buttons), alert=alert
     )
@@ -223,74 +237,60 @@ async def show_variant_screen(
 ) -> None:
     touch_customer(update)
     user_id = require_user(update).id
-    lang = get_lang(user_id)
 
     variant = products_repo.get_variant(variant_id)
     if variant is None or not products_repo.is_variant_available(variant):
-        alert = unavailable_alert(variant, lang)
+        alert = unavailable_alert(variant)
         if variant is not None and variant["product_is_active"]:
             await show_product_card(update, context, variant["product_id"], page, alert=alert)
         else:
             await show_categories(update, context, alert=alert)
         return
 
+    icon = delivery_icon(variant["delivery_kind"])
     lines = [
-        bold(variant["product_name"]),
-        t("catalogue.edition_label", lang, label=esc(variant["variant_label"])),
-        t("catalogue.price_label", lang, price=stars(variant["price_stars"])),
-        t(
-            "catalogue.delivery_line",
-            lang,
-            kind=delivery_label(variant["delivery_kind"], lang),
-        ),
+        t("catalogue.edition_label", label=esc(trim(variant["variant_label"], NAME_BUDGET))),
+        t("catalogue.price_label", price=stars(variant["price_stars"])),
+        f"{icon} " + t("catalogue.delivery_line", kind=delivery_label(variant["delivery_kind"])),
     ]
     rows: list[list[InlineKeyboardButton]] = []
-    stepper = _is_stepper_edition(variant)
     add_qty = MIN_QTY
-    if stepper:
+    if _is_stepper_edition(variant):
         limit = cart.max_quantity_for(variant["delivery_kind"], variant["key_stock"])
         qty = max(MIN_QTY, min(qty, limit))
         add_qty = qty
-        lines += [
-            "",
-            bold(
-                t(
-                    "catalogue.total_for_qty",
-                    lang,
-                    qty=qty,
-                    total=stars(variant["price_stars"] * qty),
-                )
-            ),
-        ]
+        total = esc(
+            t("catalogue.total_for_qty", qty=qty, total=stars(variant["price_stars"] * qty))
+        )
+        lines += ["", f"<b>{total}</b>"]
         rows.append(
             [
                 InlineKeyboardButton(
-                    "−", callback_data=cb("cat", "q", variant_id, page, qty, "dec")
+                    ICON.minus, callback_data=cb("cat", "q", variant_id, page, qty, "dec")
                 ),
                 InlineKeyboardButton(str(qty), callback_data="noop"),
                 InlineKeyboardButton(
-                    "+", callback_data=cb("cat", "q", variant_id, page, qty, "inc")
+                    ICON.plus, callback_data=cb("cat", "q", variant_id, page, qty, "inc")
                 ),
             ]
         )
     rows.append(
         [
             InlineKeyboardButton(
-                t("catalogue.add_to_cart_button", lang),
+                t("catalogue.add_to_cart_button"),
                 callback_data=cb("cat", "add", variant_id, page, add_qty),
             )
         ]
     )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                t("catalogue.back_to_product", lang),
-                callback_data=cb("cat", "p", variant["product_id"], page),
-            ),
-            InlineKeyboardButton(_cart_label(user_id, lang), callback_data=cb("cart", "view")),
-        ]
+    rows.append([_cart_button(user_id)])
+    rows.append(nav_row(back=cb("cat", "p", variant["product_id"], page)))
+    text = screen(
+        icon,
+        trim(variant["product_name"], NAME_BUDGET),
+        "\n".join(lines),
+        crumbs=[t("catalogue.heading"), trim(variant["category_name"], NAME_BUDGET)],
     )
-    await show_screen(update, context, text="\n".join(lines), keyboard=InlineKeyboardMarkup(rows))
+    await show_screen(update, context, text=text, keyboard=InlineKeyboardMarkup(rows))
 
 
 # ---------------------------------------------------------------------------
@@ -299,8 +299,7 @@ async def show_variant_screen(
 
 
 async def _expired(update: Update) -> None:
-    lang = get_lang(require_user(update).id)
-    await require_query(update).answer(t("common.expired_menu", lang), show_alert=True)
+    await require_query(update).answer(t("common.expired_menu"), show_alert=True)
 
 
 async def cat_cat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -335,7 +334,6 @@ async def cat_v(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cat_q(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = require_query(update)
-    lang = get_lang(require_user(update).id)
     parts = parse_callback(require_data(query), 6)
     if parts is None:
         await _expired(update)
@@ -354,9 +352,9 @@ async def cat_q(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     clamped = max(MIN_QTY, min(limit, new_q))
     if clamped == q:
         alert = (
-            t("catalogue.min_qty_alert", lang, min=MIN_QTY)
+            t("catalogue.min_qty_alert", min=MIN_QTY)
             if direction == "dec"
-            else t("catalogue.max_qty_alert", lang, max=limit)
+            else t("catalogue.max_qty_alert", max=limit)
         )
         await query.answer(alert, show_alert=True)
         return
@@ -366,7 +364,6 @@ async def cat_q(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cat_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = require_query(update)
     user_id = require_user(update).id
-    lang = get_lang(user_id)
     parts = parse_callback(require_data(query), 5)
     if parts is None:
         await _expired(update)
@@ -379,13 +376,13 @@ async def cat_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     variant = products_repo.get_variant(vid)
     if variant is None or not products_repo.is_variant_available(variant):
-        await query.answer(unavailable_alert(variant, lang), show_alert=True)
+        await query.answer(unavailable_alert(variant), show_alert=True)
         return
 
     existing = cart.current_qty(user_id, vid)
     limit = cart.max_quantity_for(variant["delivery_kind"], variant["key_stock"])
     if limit <= 0:
-        await query.answer(t("catalogue.out_of_stock_alert", lang), show_alert=True)
+        await query.answer(t("catalogue.out_of_stock_alert"), show_alert=True)
         return
     if existing >= limit:
         key = (
@@ -393,43 +390,39 @@ async def cat_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if _is_stepper_edition(variant)
             else "catalogue.already_in_cart_alert"
         )
-        await query.answer(t(key, lang, max=limit), show_alert=True)
+        await query.answer(t(key, max=limit), show_alert=True)
         return
 
     effective = cart.add(user_id, vid, q)
     added = effective - existing
     if added <= 0:  # stock vanished between the check above and the write
-        await query.answer(t("catalogue.out_of_stock_alert", lang), show_alert=True)
+        await query.answer(t("catalogue.out_of_stock_alert"), show_alert=True)
         return
 
-    text = t(
+    body = t(
         "catalogue.added_to_cart",
-        lang,
         qty=added,
-        product=bold(variant["product_name"]),
-        variant=esc(variant["variant_label"]),
+        product=esc(trim(variant["product_name"], NAME_BUDGET)),
+        variant=esc(trim(variant["variant_label"], NAME_BUDGET)),
     )
     if added < q:
-        text += "\n" + t("catalogue.added_capped_note", lang)
+        body += "\n" + esc(t("catalogue.added_capped_note"))
+    text = screen(ICON.ok, t("catalogue.added_title"), body)
 
     keyboard = InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    t("catalogue.keep_browsing_button", lang),
+                    t("catalogue.view_cart_button"), callback_data=cb("cart", "view")
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("catalogue.keep_browsing_button"),
                     callback_data=cb("cat", "cat", variant["category_id"], page),
                 )
             ],
-            [
-                InlineKeyboardButton(
-                    t("catalogue.view_cart_button", lang), callback_data=cb("cart", "view")
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    t("common.back_to_menu_button", lang), callback_data=cb("menu", "show")
-                )
-            ],
+            nav_row(),
         ]
     )
     await show_screen(update, context, text=text, keyboard=keyboard)

@@ -8,10 +8,11 @@ import pytest
 
 from bot.handlers import admin_catalogue
 from bot.repo import orders as orders_repo
+from bot.ui_kit import ICON
 
 from .conftest import OWNER_ID
 from .flow import Flow
-from .helpers import add_customer, make_message, make_update
+from .helpers import HOME, add_customer, make_message, make_update
 from .shop import KEY, TEXT, pay, place_order
 
 HOSTILE = "<b>&"
@@ -36,13 +37,13 @@ def sale(user: int, lines, mode: str = "stars", delivered: bool = True) -> int:
 async def test_an_empty_shop_renders_all_zeros(flow):
     await flow.tap(admin_catalogue.route, "adm:st")
     text = flow.text
-    assert text.startswith("<b>Stats</b>")
+    assert text.startswith(f"{ICON.stats} <b>Stats</b>")
     assert "<b>Real money (Telegram Stars)</b>" in text
     assert "<b>Demo (mock) — not real money</b>" in text
     assert text.count("Last 7 days: gross ⭐ 0 · refunded ⭐ 0 · net ⭐ 0") == 2
     assert text.count("(no sales yet)") == 2
     assert "pending payment: 0" in text and "refunded: 0" in text
-    assert flow.labels() == ["Back to admin"]
+    assert flow.labels() == ["‹ Back", HOME]
 
 
 async def test_real_and_demo_sections_are_separate_with_their_own_top_editions(flow):
@@ -101,14 +102,14 @@ async def open_dashboard(db, monkeypatch):
 
 async def test_the_dashboard_without_waiting_deliveries(db, monkeypatch):
     text, labels = await open_dashboard(db, monkeypatch)
-    assert labels == ["Catalogue", "Orders", "Stats", "Settings"]
+    assert labels == ["Catalogue", "Orders", "Stats", "Settings", HOME]
     assert "awaiting delivery" not in text
 
 
 async def test_the_dashboard_shows_the_attention_count_and_line(db, monkeypatch):
     sale(3101, {TEXT: 1}, delivered=False)
     text, labels = await open_dashboard(db, monkeypatch)
-    assert labels == ["Catalogue", "Orders (1 need attention)", "Stats", "Settings"]
+    assert labels == ["Catalogue", "Orders (1 need attention)", "Stats", "Settings", HOME]
     assert "1 paid order awaiting delivery" in text
 
     sale(3102, {KEY: 1}, delivered=False)

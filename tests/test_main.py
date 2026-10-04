@@ -42,7 +42,7 @@ def test_build_application_registers_the_expected_handlers(boot_env):
     assert any(isinstance(h, TypeHandler) and h.type is Update for h in application.handlers[-1])
 
     commands = {c for h in handlers if isinstance(h, CommandHandler) for c in h.commands}
-    assert commands == {"start", "admin", "paysupport", "sweep", "order"}
+    assert commands == {"start", "admin", "paysupport", "sweep", "order", "library"}
 
     patterns = {
         h.pattern.pattern
@@ -57,7 +57,6 @@ def test_build_application_registers_the_expected_handlers(boot_env):
         r"^lib:",
         r"^menu:",
         r"^help:",
-        r"^lang:",
     }
 
     message_handlers = [h for h in handlers if isinstance(h, MessageHandler)]
@@ -153,7 +152,6 @@ def test_main_boots_in_mock_mode_and_registers_every_handler(boot_env, monkeypat
         "successful_payment",
         "menu_show",
         "help_placeholder",
-        "lang_route",
         "unknown_callback",
         "throttle",
         "find_order",

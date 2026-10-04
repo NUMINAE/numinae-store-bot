@@ -38,6 +38,7 @@ def test_a_database_at_0001_upgrades_cleanly_and_keeps_its_rows(tmp_path: Path):
     assert run_migrations(conn, db_module.MIGRATIONS_DIR) == [
         "0002_order_item_delivery.sql",
         "0003_variant_file_name.sql",
+        "0004_drop_customer_language.sql",
     ]
 
     assert "delivered_at" in _columns(conn, "order_items")
@@ -50,6 +51,7 @@ def test_a_database_at_0001_upgrades_cleanly_and_keeps_its_rows(tmp_path: Path):
         "0001_init.sql",
         "0002_order_item_delivery.sql",
         "0003_variant_file_name.sql",
+        "0004_drop_customer_language.sql",
     ]
     conn.close()
 

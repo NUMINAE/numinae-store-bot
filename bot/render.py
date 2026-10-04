@@ -8,6 +8,8 @@ from __future__ import annotations
 import html
 from typing import Any
 
+from .ui_kit import ICON
+
 
 def esc(value: Any) -> str:
     return html.escape(str(value))
@@ -15,7 +17,7 @@ def esc(value: Any) -> str:
 
 def stars(amount: int) -> str:
     """Money is whole Telegram Stars; this is the only place it is formatted."""
-    return f"⭐ {amount}"
+    return f"{ICON.stars} {amount}"
 
 
 def code(value: Any) -> str:

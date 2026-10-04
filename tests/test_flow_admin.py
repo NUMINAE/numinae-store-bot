@@ -15,7 +15,7 @@ from bot.repo import variants as variants_repo
 
 from .conftest import OWNER_ID
 from .flow import Flow
-from .helpers import add_customer, make_message, make_update
+from .helpers import HOME, add_customer, make_message, make_update
 
 HOSTILE = "<b>&"
 
@@ -52,14 +52,14 @@ async def test_dashboard_has_catalogue_orders_and_settings_only(flow):
     update = make_update(OWNER_ID, message=make_message("/admin"), chat_id=OWNER_ID)
     await admin_catalogue.dashboard(update, flow.context)
     labels = [label for label, _ in sent_buttons(flow)]
-    assert labels == ["Catalogue", "Orders", "Stats", "Settings"]
+    assert labels == ["Catalogue", "Orders", "Stats", "Settings", HOME]
     assert "ayment" not in sent_text(flow)
 
 
 async def test_orders_button_opens_the_orders_screen(flow):
     await flow.tap(admin_catalogue.route, "adm:o")
     assert "Orders" in flow.text
-    assert "All (0)" in flow.labels() and "Back to admin" in flow.labels()
+    assert "All (0)" in flow.labels() and flow.data_for("‹ Back") == "adm:home"
 
 
 async def test_old_payment_and_order_admin_routes_are_gone(flow):
@@ -80,7 +80,7 @@ async def test_creating_a_text_edition_walks_label_price_kind(flow):
 
     await flow.send(router.route_text, "⭐150")
     assert pending_repo.get(OWNER_ID)["action"] == "var_create_kind"
-    assert [label for label, _ in sent_buttons(flow)] == ["File", "Keys", "Text", "Cancel"]
+    assert [label for label, _ in sent_buttons(flow)] == ["File", "Keys", "Text", "Cancel", HOME]
     assert "cannot be changed later" in sent_text(flow)
 
     await flow.tap(admin_catalogue.route, "adm:va:ck:t")

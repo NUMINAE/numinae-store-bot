@@ -228,9 +228,9 @@ async def test_pasted_keys_are_added_and_reported_by_count(flow, editions, db):
 
     assert keys_repo.count_by_status(variant)["available"] == 3  # EXIST-1, K-1, K-2
     report = flow.replies[-1]
-    assert "Added 2 key(s)." in report
-    assert "Skipped 2 duplicate(s)." in report  # one in the batch, one already in stock
-    assert "Skipped 1 invalid line(s): 6." in report
+    assert "Added 2 keys." in report
+    assert "Skipped 2 duplicates." in report  # one in the batch, one already in stock
+    assert "Skipped 1 invalid line: 6." in report
     assert pending_repo.get(OWNER_ID) is None
 
 
@@ -259,7 +259,7 @@ async def test_only_ten_invalid_line_numbers_are_listed(flow, editions):
     lines = ["OK"] + [f"bad{n}\x00" for n in range(15)]
     await flow.send(router.route_text, "\n".join(lines))
     report = flow.replies[-1]
-    assert "Skipped 15 invalid line(s): 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 (and 5 more)." in report
+    assert "Skipped 15 invalid lines: 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 (and 5 more)." in report
 
 
 async def test_a_batch_over_the_limit_reports_it(flow, editions):
@@ -275,7 +275,7 @@ async def test_nothing_usable_keeps_the_prompt_open(flow, editions):
     await flow.tap(admin_catalogue.route, f"adm:va:ak:{variant}")
     await flow.send(router.route_text, key_text("bad\x00", "   ", "worse\x01"))
     assert "No usable keys found." in flow.replies[-1]
-    assert "invalid line(s): 1, 3" in flow.replies[-1]
+    assert "invalid lines: 1, 3" in flow.replies[-1]
     assert pending_repo.get(OWNER_ID)["action"] == "var_keys"
     assert keys_repo.count_available(variant) == 0
 
@@ -293,7 +293,7 @@ async def test_a_txt_file_of_keys_is_downloaded_into_memory_parsed_and_added(flo
     flow.context.bot.get_file.assert_awaited_once_with("KEYFILE")
     flow.served.download_as_bytearray.assert_awaited_once_with()  # into memory: no path given
     assert keys_repo.count_available(variant) == 3
-    assert replies(message) == ["Added 3 key(s).\nSkipped 1 duplicate(s)."]
+    assert replies(message) == ["Added 3 keys.\nSkipped 1 duplicate."]
     assert pending_repo.get(OWNER_ID) is None
 
 

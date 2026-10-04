@@ -17,9 +17,10 @@ from telegram.ext import ContextTypes
 
 from ..keyboards import cb
 from ..limits import MAX_ORDER_STARS
-from ..render import stars
+from ..render import esc, stars
 from ..tg import require_message
 from ..ui import show_screen
+from ..ui_kit import ICON, nav_row, screen
 
 T = TypeVar("T")
 
@@ -39,8 +40,8 @@ class Invalid:
 
 MAX_PRICE_STARS = MAX_ORDER_STARS  # a single edition can never exceed one invoice
 MAX_DELIVERY_TEXT_LEN = 2000
-_PRICE_RE = re.compile(r"^(?:⭐\ufe0f?\s*)?(\d{1,12})$")
-_PRICE_HELP = "Send a whole number of Stars, e.g. 75 or ⭐75."
+_PRICE_RE = re.compile(rf"^(?:{re.escape(ICON.stars)}️?\s*)?(\d{{1,12}})$")
+_PRICE_HELP = f"Send a whole number of Stars, e.g. 75 or {ICON.stars}75."
 
 
 def validate_name(text: str) -> Valid[str] | Invalid:
@@ -60,14 +61,14 @@ def validate_description(text: str) -> Valid[str] | Invalid:
 
 
 def validate_price(text: str) -> Valid[int] | Invalid:
-    """Whole Telegram Stars only: "75" or "⭐75". Decimals, zero, negatives and
+    """Whole Telegram Stars only: "75" or a star followed by 75. Decimals, zero, negatives and
     anything over MAX_PRICE_STARS are rejected."""
     match = _PRICE_RE.match(text.strip())
     if not match:
         return Invalid(f"That doesn't look like a price. {_PRICE_HELP}")
     amount = int(match.group(1))
     if amount <= 0:
-        return Invalid("Price must be at least ⭐1.")
+        return Invalid(f"Price must be at least {ICON.stars}1.")
     if amount > MAX_PRICE_STARS:
         return Invalid(f"Price must be {stars(MAX_PRICE_STARS)} or less.")
     return Valid(amount, stars(amount))
@@ -103,12 +104,27 @@ def cancel_button() -> InlineKeyboardButton:
 
 
 def cancel_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[cancel_button()]])
+    return InlineKeyboardMarkup([[cancel_button()], nav_row()])
 
 
-async def prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
-    keyboard = InlineKeyboardMarkup([[cancel_button()]])
-    await show_screen(update, context, text=text, keyboard=keyboard)
+async def prompt(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    *,
+    title: str = "Edit",
+    step: tuple[int, int] | None = None,
+) -> None:
+    """A typed-input prompt. `text` is already-rendered HTML (the body);
+    `title` is plain. The keyboard is Cancel plus the nav row; Home abandons the
+    pending input (see handlers/common.menu_show)."""
+    keyboard = InlineKeyboardMarkup([[cancel_button()], nav_row()])
+    await show_screen(
+        update,
+        context,
+        text=screen(ICON.admin, title, text, step=step),
+        keyboard=keyboard,
+    )
     # Every admin typed-input prompt goes through here, so this is the one
     # place that needs to hide the customer reply keyboard while the owner
     # types — the prompt above already used its reply_markup slot for the
@@ -117,7 +133,7 @@ async def prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) 
     if chat is None:
         return
     await context.bot.send_message(
-        chat_id=chat.id, text="Type below.", reply_markup=ReplyKeyboardRemove()
+        chat_id=chat.id, text=f"{ICON.info} Type below.", reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -125,8 +141,8 @@ async def reprompt_after_invalid(
     update: Update, context: ContextTypes.DEFAULT_TYPE, error: str
 ) -> None:
     """Validation failed: keep the pending row, explain, let them retype."""
-    keyboard = InlineKeyboardMarkup([[cancel_button()]])
-    await require_message(update).reply_text(error, reply_markup=keyboard)
+    keyboard = InlineKeyboardMarkup([[cancel_button()], nav_row()])
+    await require_message(update).reply_text(f"{ICON.warning} {esc(error)}", reply_markup=keyboard)
 
 
 def status_word(is_active) -> str:

@@ -16,10 +16,11 @@ from bot.refunds import RefundResult, RefundStatus
 from bot.repo import cart as cart_repo
 from bot.repo import customers as customers_repo
 from bot.repo import orders as orders_repo
+from bot.ui_kit import ICON
 
 from .conftest import OWNER_ID
 from .flow import Flow
-from .helpers import add_customer, make_context, make_message, make_update
+from .helpers import HOME, add_customer, make_context, make_message, make_update
 from .shop import KEY, TEXT, key_states, pay, place_order
 
 BUYER = 3001
@@ -79,7 +80,8 @@ async def test_the_root_shows_every_filter_with_live_counts(flow):
         "Delivered (1)",
         "Refunded (0)",
         "Closed (0)",
-        "Back to admin",
+        "‹ Back",
+        HOME,
     ]
     assert flow.buttons[1][1] == "adm:o:l:all:0"
 
@@ -91,8 +93,8 @@ async def test_the_list_shows_id_stars_status_and_age_newest_first(flow, db):
     db.commit()
     await flow.tap(admin_catalogue.route, "adm:o:l:all:0")
     assert flow.labels()[:2] == [
-        f"#{second} - ⭐ 100 - Delivered - 0m",
-        f"#{first} - ⭐ 75 - Paid - 3h",
+        f"{ICON.delivered} #{second} · ⭐ 100 · Delivered · 0m",
+        f"{ICON.paid} #{first} · ⭐ 75 · Paid · 3h",
     ]
     assert flow.buttons[0][1] == f"adm:o:v:{second}"
 
@@ -117,17 +119,17 @@ async def test_paging_is_five_per_page_with_arrows_omitted_at_the_edges(flow):
         paid_order(user=3200 + n)
     await flow.tap(admin_catalogue.route, "adm:o:l:all:0")
     assert len([d for _, d in flow.buttons if d.startswith("adm:o:v:")]) == 5
-    assert "◀" not in flow.labels() and "▶" in flow.labels() and "Page 1/2" in flow.labels()
+    assert "◀" not in flow.labels() and "▶" in flow.labels() and "1 / 2" in flow.labels()
     await flow.tap(admin_catalogue.route, "adm:o:l:all:1")
     assert len([d for _, d in flow.buttons if d.startswith("adm:o:v:")]) == 2
     assert "◀" in flow.labels() and "▶" not in flow.labels()
     await flow.tap(admin_catalogue.route, "adm:o:l:all:99")  # clamped
-    assert "Page 2/2" in flow.labels()
+    assert "2 / 2" in flow.labels()
 
 
 async def test_an_empty_filter_and_an_unknown_filter(flow):
     await flow.tap(admin_catalogue.route, "adm:o:l:refunded:0")
-    assert "No orders here." in flow.text and "Back to orders" in flow.labels()
+    assert "No orders here." in flow.text and flow.data_for("‹ Back") == "adm:o"
     await flow.tap(admin_catalogue.route, "adm:o:l:bogus:0")  # falls back to the root
     assert "All (0)" in flow.labels()
 
@@ -154,7 +156,7 @@ async def test_the_card_shows_everything_the_owner_needs(flow, db):
     await flow.tap(admin_catalogue.route, f"adm:o:v:{order_id}")
 
     text = flow.text
-    assert f"<b>Order #{order_id}</b> — Delivered" in text
+    assert f"<b>Order #{order_id}</b>" in text and f"{ICON.delivered} Delivered" in text
     assert "Buyer: Alice @alice_buyer (<code>3001</code>)" in text
     for label in ("Created:", "Paid:", "Delivered:", "Expires:"):
         assert label in text
@@ -226,7 +228,7 @@ async def test_a_missing_order_card(flow):
 async def test_actions_offered_by_status(flow, make, expected):
     order_id = make()
     await flow.tap(admin_catalogue.route, f"adm:o:v:{order_id}")
-    assert card_buttons(flow) == [*expected, "Back to orders"]
+    assert card_buttons(flow) == [*expected, "‹ Back", HOME]
 
 
 @pytest.mark.parametrize("final", ["refunded", "cancelled", "expired"])
@@ -240,7 +242,7 @@ async def test_closed_orders_offer_no_actions(flow, final):
         pay(order_id)
         orders_repo.mark_refunded(order_id, "owner")
     await flow.tap(admin_catalogue.route, f"adm:o:v:{order_id}")
-    assert card_buttons(flow) == ["Back to orders"]
+    assert card_buttons(flow) == ["‹ Back", HOME]
 
 
 # --- cancel -----------------------------------------------------------------------------------
@@ -261,13 +263,6 @@ async def test_cancel_confirms_then_releases_keys_without_restoring_the_cart_and
     assert to_buyer(flow) == [f"Your order #{order_id} was cancelled by the shop."]
     event = orders_repo.list_events(order_id)[-1]
     assert (event["to_status"], event["actor"]) == ("cancelled", "owner")
-
-
-async def test_the_buyer_is_notified_in_their_language(flow):
-    order_id = place_order(BUYER)
-    customers_repo.set_language(BUYER, "ru")
-    await flow.tap(admin_catalogue.route, f"adm:ord:cancel:{order_id}:yes")
-    assert to_buyer(flow) == [f"Ваш заказ №{order_id} был отменён магазином."]
 
 
 async def test_a_failed_buyer_notification_is_shown_on_the_card(flow, caplog):
@@ -291,7 +286,7 @@ async def test_a_failed_buyer_notification_is_shown_on_the_card(flow, caplog):
 async def test_retry_delivery_delivers_a_stuck_order_and_reports(flow, db):
     order_id = paid_order({TEXT: 1, KEY: 1})
     await flow.tap(admin_catalogue.route, f"adm:ord:retry:{order_id}")
-    assert "Delivered 2 item(s)." in flow.text
+    assert "Delivered 2 items." in flow.text
     assert orders_repo.get(order_id)["status"] == "delivered"
     assert any("example.com/demo" in m for m in to_buyer(flow))
 
@@ -327,7 +322,7 @@ async def test_resend_sends_every_item_again_without_touching_state(flow):
 
     await flow.tap(admin_catalogue.route, f"adm:ord:resend:{order_id}")
 
-    assert "Re-sent 2 of 2 item(s) to the buyer." in flow.text
+    assert "Re-sent 2 of 2 items to the buyer." in flow.text
     assert len(to_buyer(flow)) == 2
     assert [dict(i) for i in orders_repo.get_with_items(order_id)[1]] == items_before
     assert dict(orders_repo.get(order_id)) == order_before
@@ -338,7 +333,7 @@ async def test_resend_counts_the_items_that_failed(flow):
     order_id = delivered_order({TEXT: 1, 2: 1})
     flow.context.bot.send_message.side_effect = [None, Forbidden("blocked")]
     await flow.tap(admin_catalogue.route, f"adm:ord:resend:{order_id}")
-    assert "Re-sent 1 of 2 item(s)" in flow.text
+    assert "Re-sent 1 of 2 items" in flow.text
 
 
 # --- refunds ----------------------------------------------------------------------------------
@@ -350,7 +345,7 @@ async def test_refund_confirmation_states_the_amount_revocation_and_what_cannot_
     assert "full ⭐ 100 goes back to the buyer" in flow.text
     assert "Sold licence keys will be revoked" in flow.text
     assert "Delivered text and files cannot be unsent" in flow.text
-    assert flow.labels() == ["Confirm", "Cancel"]
+    assert flow.labels() == ["Confirm", "Cancel", "‹ Back", HOME]
     assert orders_repo.get(order_id)["status"] == "delivered"  # nothing refunded yet
     flow.context.bot.refund_star_payment.assert_not_called()
 
@@ -366,18 +361,11 @@ async def test_a_confirmed_refund_refunds_revokes_notifies_and_rerenders(flow, d
     )
     assert orders_repo.get(order_id)["status"] == "refunded"
     assert key_states(db) == {"available": 7, "revoked": 3}
-    assert "Refunded: 3 key(s) revoked." in flow.text and "— Refunded" in flow.text
-    assert card_buttons(flow) == ["Back to orders"]
+    assert "Refunded: 3 keys revoked." in flow.text and "— Refunded" in flow.text
+    assert card_buttons(flow) == ["‹ Back", HOME]
     (notice,) = to_buyer(flow)
     assert notice.startswith(f"Your order #{order_id} was refunded (⭐ 150).")
     assert "licence keys from this order are no longer valid" in notice
-
-
-async def test_the_refund_notification_is_localised(flow):
-    order_id = delivered_order({TEXT: 1})
-    customers_repo.set_language(BUYER, "ru")
-    await flow.tap(admin_catalogue.route, f"adm:ord:refund:{order_id}:yes")
-    assert "возвращён (⭐ 75)" in to_buyer(flow)[0]
 
 
 async def test_a_refund_for_a_mock_order_never_reaches_telegram(flow):
@@ -495,7 +483,9 @@ async def test_stale_actions_answer_with_the_real_status_and_rerender_the_card(
     before = (dict(orders_repo.get(order_id)), len(orders_repo.list_events(order_id)))
     await flow.tap(admin_catalogue.route, "adm:ord:" + action.format(id=order_id))
     assert flow.alert == f"Order #{order_id} is now: {status_word}."
-    assert f"<b>Order #{order_id}</b> — {status_word}" in flow.text  # the card, re-rendered
+    assert (
+        f"<b>Order #{order_id}</b>" in flow.text and f" {status_word}\n" in flow.text
+    )  # the card, re-rendered
     assert (dict(orders_repo.get(order_id)), len(orders_repo.list_events(order_id))) == before
     assert to_buyer(flow) == []
 
@@ -543,7 +533,7 @@ async def test_order_command_opens_the_card_for_the_owner(db):
     update, context, message = command(OWNER_ID, str(order_id))
     await admin_orders.find_order(update, context)
     text = str(context.bot.send_message.await_args.kwargs["text"])
-    assert f"<b>Order #{order_id}</b> — Paid" in text
+    assert f"<b>Order #{order_id}</b>" in text and f"{ICON.paid} Paid" in text
     message.reply_text.assert_not_called()
 
 
@@ -625,7 +615,7 @@ async def test_buy_a_key_edition_in_mock_mode_then_refund_it_from_the_admin_card
     assert "Resend to buyer" in owner.labels() and "Refund" in owner.labels()
     await owner.tap(admin_catalogue.route, f"adm:ord:refund:{order_id}")
     await owner.tap(admin_catalogue.route, f"adm:ord:refund:{order_id}:yes")
-    assert "Refunded: 3 key(s) revoked." in owner.text
+    assert "Refunded: 3 keys revoked." in owner.text
 
     assert orders_repo.get(order_id)["status"] == "refunded"
     assert key_states(db) == {"available": 7, "revoked": 3}  # revoked, never available again
@@ -637,7 +627,7 @@ async def test_buy_a_key_edition_in_mock_mode_then_refund_it_from_the_admin_card
     assert buyer_again.labels()[0].endswith("· Refunded")
     item_id = int(buyer_again.buttons[0][1].rsplit(":", 1)[1])
     await buyer_again.tap(library.route, f"lib:item:{item_id}")
-    assert "Status: Refunded" in buyer_again.text
+    assert "Status: ↩️ Refunded" in buyer_again.text
     assert not any(d.startswith("lib:send:") for _, d in buyer_again.buttons)
 
     owner_again = Flow(monkeypatch, OWNER_ID, mode="mock")

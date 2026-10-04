@@ -100,7 +100,7 @@ async def test_checkout_shows_a_remove_some_items_screen_instead_of_the_review(d
     flow = Flow(monkeypatch, USER)
     await flow.tap(checkout.route, "co:start")
     assert "Remove some items" in flow.text and "⭐ 25001" in flow.text
-    assert "Back to cart" in flow.labels()
+    assert flow.data_for("‹ Back") == "cart:view"
     assert not any(label.startswith("Pay") for label in flow.labels())
 
 

@@ -93,18 +93,32 @@ def test_cb_counts_bytes_not_characters():
 # --- reply keyboard labels --------------------------------------------------
 
 
-def test_every_label_maps_to_an_action_in_both_languages():
-    assert set(MENU_LABELS) == {"en", "ru"}
-    for labels in MENU_LABELS.values():
-        browse, cart, library = labels
-        assert MENU_ACTION_BY_LABEL[browse] == "browse"
-        assert MENU_ACTION_BY_LABEL[cart] == "cart"
-        assert MENU_ACTION_BY_LABEL[library] == "library"
-    assert len(MENU_ACTION_BY_LABEL) == 6
+def test_exactly_three_english_labels_map_to_actions():
+    assert MENU_LABELS == ("Browse Products", "Shopping Cart", "My Library")
+    browse, cart, library = MENU_LABELS
+    assert MENU_ACTION_BY_LABEL[browse] == "browse"
+    assert MENU_ACTION_BY_LABEL[cart] == "cart"
+    assert MENU_ACTION_BY_LABEL[library] == "library"
+    assert len(MENU_ACTION_BY_LABEL) == 3
+
+
+def bs_u(codes: str) -> str:
+    """Build a string from hex code points, so no Cyrillic literal sits in the source."""
+    return "".join(chr(int(code, 16)) for code in codes.split())
+
+
+def test_the_former_russian_labels_no_longer_map_to_anything():
+    former = (
+        bs_u("041f 0440 043e 0441 043c 043e 0442 0440 0020 0442 043e 0432 0430 0440 043e 0432"),
+        bs_u("041a 043e 0440 0437 0438 043d 0430"),
+        bs_u("041c 043e 044f 0020 0431 0438 0431 043b 0438 043e 0442 0435 043a 0430"),
+    )
+    for label in former:
+        assert label not in MENU_ACTION_BY_LABEL
 
 
 def test_labels_are_matched_exactly_only():
-    label = MENU_LABELS["en"][0]
+    label = MENU_LABELS[0]
     for near_miss in (
         label.lower(),
         label.upper(),
@@ -116,14 +130,8 @@ def test_labels_are_matched_exactly_only():
         assert near_miss not in MENU_ACTION_BY_LABEL
 
 
-@pytest.mark.parametrize("lang", ["en", "ru"])
-def test_main_reply_keyboard_uses_the_language_labels(lang):
-    markup = main_reply_keyboard(lang)
-    assert [b.text for b in markup.keyboard[0]] == list(MENU_LABELS[lang])
+def test_main_reply_keyboard_has_the_three_labels():
+    markup = main_reply_keyboard()
+    assert [b.text for b in markup.keyboard[0]] == list(MENU_LABELS)
     assert markup.is_persistent
     assert markup.resize_keyboard
-
-
-def test_main_reply_keyboard_falls_back_to_english():
-    markup = main_reply_keyboard("xx")
-    assert [b.text for b in markup.keyboard[0]] == list(MENU_LABELS["en"])

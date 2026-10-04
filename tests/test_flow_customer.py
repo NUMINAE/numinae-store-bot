@@ -132,7 +132,7 @@ async def test_stepper_quantity_travels_in_callback_data_and_is_added(flow):
 async def test_adding_more_than_stock_clamps_and_a_full_line_alerts(flow):
     await flow.tap(catalogue.route, f"cat:add:{KEY_EDITION}:0:99")
     assert cart_repo.current_qty(USER, KEY_EDITION) == 10
-    assert "That's all the stock there is." in flow.text
+    assert "That&#x27;s all the stock there is." in flow.text
 
     await flow.tap(catalogue.route, f"cat:add:{KEY_EDITION}:0:1")
     assert flow.alert == "Only 10 available — that's the maximum."
@@ -273,12 +273,12 @@ async def test_cart_controls_step_key_lines_and_remove(flow):
     await flow.tap(cart.route, flow.data_for("−"))
     assert "× 1 — ⭐ 50" in flow.text
     await flow.tap(cart.route, flow.data_for("−"))  # to zero removes the line
-    assert flow.text == "Your cart is empty."
+    assert "Your cart is empty." in flow.text and "Subtotal" not in flow.text
 
     cart_repo.add(USER, TEXT_EDITION, 1)
     await flow.tap(cart.route, "cart:view")
     await flow.tap(cart.route, flow.data_for("✕"))
-    assert flow.text == "Your cart is empty."
+    assert "Your cart is empty." in flow.text and "Subtotal" not in flow.text
 
 
 async def test_the_plus_button_is_hidden_at_the_cap_and_a_stale_one_alerts(flow):
@@ -337,8 +337,8 @@ async def test_unavailable_lines_are_annotated_excluded_and_only_removable(flow)
     assert "Subtotal: ⭐ 75" in flow.text
     remove = [label for label in flow.labels() if label.startswith("✕ Remove")]
     assert len(remove) == 1 and "Orbit Icons Pro" in remove[0]
-    unavailable_data = [d for _, d in flow.buttons if d.endswith(f":{KEY_EDITION}")]
-    assert unavailable_data == [f"cart:remove:{KEY_EDITION}"]
+    unavailable_data = [d for _, d in flow.buttons if d.endswith(f":{KEY_EDITION}:0")]
+    assert unavailable_data == [f"cart:remove:{KEY_EDITION}:0"]
 
 
 async def test_clear_cart_asks_first_and_no_keeps_the_cart(flow):
@@ -346,7 +346,7 @@ async def test_clear_cart_asks_first_and_no_keeps_the_cart(flow):
     cart_repo.add(USER, KEY_EDITION, 2)
     await flow.tap(cart.route, "cart:view")
     await flow.tap(cart.route, flow.data_for("Clear cart"))
-    assert flow.text == "Clear all 3 items from your cart?"
+    assert "Clear all 3 items from your cart?" in flow.text
     assert cart_repo.summary(USER) == (3, 175)  # nothing cleared yet
 
     await flow.tap(cart.route, flow.data_for("No"))
@@ -354,7 +354,7 @@ async def test_clear_cart_asks_first_and_no_keeps_the_cart(flow):
 
     await flow.tap(cart.route, "cart:clear:ask")
     await flow.tap(cart.route, flow.data_for("Yes, clear"))
-    assert flow.text == "Your cart is empty."
+    assert "Your cart is empty." in flow.text and "Subtotal" not in flow.text
     assert cart_repo.list_lines(USER) == []
 
 
@@ -363,9 +363,9 @@ async def test_the_checkout_button_hands_over_to_the_checkout_flow(flow):
     await flow.tap(cart.route, "cart:view")
     assert flow.data_for("Checkout") == "co:start"
     await flow.tap(checkout.route, "co:start")
-    assert "Review your order" in flow.text
-    assert "Back to cart" in flow.labels()
-    await flow.tap(cart.route, flow.data_for("Back to cart"))
+    assert "Step 1 of 3 · Review" in flow.text
+    assert flow.data_for("‹ Back") == "cart:view"
+    await flow.tap(cart.route, flow.data_for("‹ Back"))
     assert "Your cart" in flow.text
 
 
@@ -375,16 +375,18 @@ async def test_malformed_cart_callbacks_alert_instead_of_crashing(flow):
         assert flow.alert == "This menu has expired."
 
 
-# --- main menu, library stub, language ----------------------------------------------------------
+# --- main menu, library, stale language buttons -------------------------------------------------
 
 
-async def test_main_menu_has_my_library_and_no_orders_button(flow):
-    text, keyboard = common.render_main_menu(USER, "en")
+async def test_main_menu_has_my_library_and_no_orders_or_language_button(flow):
+    text, keyboard = common.render_main_menu(USER)
     labels = [b.text for row in keyboard.inline_keyboard for b in row]
     datas = [b.callback_data for row in keyboard.inline_keyboard for b in row]
     assert "My Library" in labels and "lib:list:0" in datas
     assert not any("order" in label.lower() for label in labels)
     assert not any(str(d).startswith("ord:") for d in datas)
+    assert not any("language" in label.lower() for label in labels)
+    assert not any(str(d).startswith("lang:") for d in datas)
 
 
 async def test_library_button_opens_the_library(flow):
@@ -392,23 +394,14 @@ async def test_library_button_opens_the_library(flow):
     assert "library is empty" in flow.text
 
 
-async def test_language_switch_resends_the_reply_keyboard_in_the_new_language(flow):
-    await flow.tap(common.lang_route, "lang:set:ru")
-    (call,) = flow.sent_messages()
-    keyboard = call.kwargs["reply_markup"]
-    assert [b.text for b in keyboard.keyboard[0]] == [
-        "Просмотр товаров",
-        "Корзина",
-        "Моя библиотека",
-    ]
-
-    await flow.tap(common.lang_route, "lang:set:en")
-    keyboard = flow.sent_messages()[-1].kwargs["reply_markup"]
-    assert [b.text for b in keyboard.keyboard[0]] == [
-        "Browse Products",
-        "Shopping Cart",
-        "My Library",
-    ]
+@pytest.mark.parametrize("data", ["lang:show", "lang:set:en", "lang:set:ru", "lang:set", "lang:"])
+async def test_a_stale_lang_callback_falls_through_to_the_expired_fallback(flow, data):
+    """Old messages still carry the removed language buttons: with no lang: route
+    registered they reach the catch-all, which says the menu expired."""
+    await flow.tap(common.unknown_callback, data)
+    assert flow.alert == "This menu has expired."
+    assert not hasattr(common, "lang_route")
+    assert not hasattr(common, "set_language") and not hasattr(common, "get_lang")
 
 
 async def test_unknown_old_order_buttons_fall_through_to_menu_expired(flow):

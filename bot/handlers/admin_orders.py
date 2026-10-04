@@ -1,7 +1,8 @@
 """Order management for the owner: browse by filter, the order card, and the
 actions on it (cancel, retry delivery, resend, refund). Registered under the
 "adm:o" (browse) and "adm:ord" (actions) callbacks, plus /order <id>. Admin
-screens are English; the notifications sent to the buyer are localized.
+screens are English literals; the notifications sent to the buyer come from
+bot/i18n.py.
 
 Idempotency: every action re-reads the order inside the handler. If the order is
 no longer in a state the action applies to (a double tap, a stale card), the
@@ -18,7 +19,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from .. import delivery, jobs
-from ..i18n import t
+from ..i18n import t, tn
 from ..keyboards import cb, parse_cb_id
 from ..refunds import RefundStatus, refund_order
 from ..render import bold, code, esc, stars
@@ -26,12 +27,17 @@ from ..repo import orders as orders_repo
 from ..security import owner_only
 from ..tg import require_message, require_query, require_user
 from ..ui import show_screen
-from .common import get_lang
+from ..ui_kit import ICON, SEP_META, SEP_PRICE, nav_row, pager, screen, status_icon, trim
 from .payments import alert_owner, safe_send
 
 logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 5
+ITEMS_SHOWN = 5  # order lines on a card; the rest are summarised
+EVENTS_SHOWN = 5  # most recent order events on a card
+NAME_BUDGET = 50  # raw characters of an item name, buyer name, event note
+NOTICE_BUDGET = 300
+CARD_TEXT_LIMIT = 3900  # leaves headroom under Telegram's 4096 for the header
 
 FILTER_LABELS = {
     "attention": "Needs attention",
@@ -81,8 +87,9 @@ async def show_root(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for key in FILTER_LABELS:
         label = f"{FILTER_LABELS[key]} ({counts[key]})"
         rows.append([_button(label, cb("adm", "o", "l", key, 0))])
-    rows.append([_button("Back to admin", cb("adm", "home"))])
-    await show_screen(update, context, text=bold("Orders"), keyboard=InlineKeyboardMarkup(rows))
+    rows.append(nav_row(back=cb("adm", "home")))
+    text = screen(ICON.orders, "Orders", crumbs=["Admin"])
+    await show_screen(update, context, text=text, keyboard=InlineKeyboardMarkup(rows))
 
 
 async def show_list(
@@ -99,23 +106,21 @@ async def show_list(
     rows: list[list[InlineKeyboardButton]] = []
     for order in orders:
         label = (
-            f"#{order['id']} - {stars(order['total_stars'])} - "
-            f"{STATUS_WORDS[order['status']]} - {age(order['created_at'])}"
+            f"{status_icon(order['status'])} #{order['id']}{SEP_META}{stars(order['total_stars'])}"
+            f"{SEP_META}{STATUS_WORDS[order['status']]}{SEP_META}{age(order['created_at'])}"
         )
         rows.append([_button(label, cb("adm", "o", "v", order["id"]))])
-    nav: list[InlineKeyboardButton] = []
-    if page > 0:
-        nav.append(_button("◀", cb("adm", "o", "l", filter_key, page - 1)))
-    if total_pages > 1:
-        nav.append(_button(f"Page {page + 1}/{total_pages}", "noop"))
-    if page < total_pages - 1:
-        nav.append(_button("▶", cb("adm", "o", "l", filter_key, page + 1)))
-    if nav:
-        rows.append(nav)
-    rows.append([_button("Back to orders", cb("adm", "o"))])
+    pager_row = pager(page, total_pages, lambda n: cb("adm", "o", "l", filter_key, n))
+    if pager_row:
+        rows.append(pager_row)
+    rows.append(nav_row(back=cb("adm", "o")))
 
-    heading = bold(f"{FILTER_LABELS[filter_key]} orders")
-    text = heading if orders else f"{heading}\n\nNo orders here."
+    text = screen(
+        ICON.orders,
+        f"{FILTER_LABELS[filter_key]} orders",
+        "" if orders else "No orders here.",
+        crumbs=["Orders"],
+    )
     await show_screen(update, context, text=text, keyboard=InlineKeyboardMarkup(rows))
 
 
@@ -125,8 +130,10 @@ async def show_list(
 
 
 def _buyer_line(buyer: sqlite3.Row | None, user_id: int) -> str:
-    name = esc(buyer["first_name"]) if buyer is not None and buyer["first_name"] else "(no name)"
-    username = f" @{esc(buyer['username'])}" if buyer is not None and buyer["username"] else ""
+    first_name = buyer["first_name"] if buyer is not None else None
+    handle = buyer["username"] if buyer is not None else None
+    name = esc(trim(first_name, NAME_BUDGET)) if first_name else "(no name)"
+    username = f" @{esc(trim(handle, NAME_BUDGET))}" if handle else ""
     return f"Buyer: {name}{username} ({code(user_id)})"
 
 
@@ -135,11 +142,12 @@ def render_card(
 ) -> tuple[str, InlineKeyboardMarkup]:
     order = card.order
     order_id = order["id"]
-    lines: list[str] = []
+    status = order["status"]
+    head: list[str] = []
     if notice:
-        lines += [f"ℹ️ {esc(notice)}", ""]
-    lines.append(f"{bold(f'Order #{order_id}')} — {STATUS_WORDS[order['status']]}")
-    lines.append(_buyer_line(card.buyer, order["user_id"]))
+        head += [f"{ICON.info} {esc(trim(notice, NOTICE_BUDGET))}", ""]
+    head.append(f"{status_icon(status)} {STATUS_WORDS[status]}")
+    head.append(_buyer_line(card.buyer, order["user_id"]))
     for label, column in (
         ("Created", "created_at"),
         ("Paid", "paid_at"),
@@ -148,32 +156,48 @@ def render_card(
         ("Expires", "expires_at"),
     ):
         if order[column]:
-            lines.append(f"{label}: {esc(order[column])} UTC")
-    lines.append(f"Total: {stars(order['total_stars'])} · Mode: {esc(order['payment_mode'])}")
+            head.append(f"{label}: {esc(order[column])} UTC")
+    head.append(f"Total: {stars(order['total_stars'])}{SEP_META}Mode: {esc(order['payment_mode'])}")
     if order["telegram_payment_charge_id"]:
-        lines.append(f"Charge id: {code(order['telegram_payment_charge_id'])}")
+        head.append(f"Charge id: {code(order['telegram_payment_charge_id'])}")
 
-    lines += ["", bold("Items")]
-    for item in card.items:
-        name = esc(f"{item['product_name']} — {item['variant_label']}")
+    item_lines = []
+    for item in card.items[:ITEMS_SHOWN]:
+        name = esc(trim(f"{item['product_name']} — {item['variant_label']}", NAME_BUDGET))
         state = (
             f"delivered {esc(item['delivered_at'])}" if item["delivered_at"] else "not delivered"
         )
-        lines.append(
-            f"• {name} × {item['quantity']} — {stars(item['line_total_stars'])} — "
-            f"{esc(item['delivery_kind'])}, {state}"
+        item_lines.append(
+            f"• {name} × {item['quantity']}{SEP_PRICE}{stars(item['line_total_stars'])}"
+            f"{SEP_PRICE}{esc(item['delivery_kind'])}, {state}"
         )
-    lines += ["", bold("Recent events")]
-    for event in card.events:
+    if len(card.items) > ITEMS_SHOWN:
+        item_lines.append(esc(tn("admin.more_items", len(card.items) - ITEMS_SHOWN)))
+
+    event_lines = []
+    for event in card.events[-EVENTS_SHOWN:]:
         arrow = (
             f"{esc(event['from_status'] or 'new')} → {esc(event['to_status'])}"
             if event["from_status"] != event["to_status"]
             else f"note ({esc(event['to_status'])})"
         )
-        note = f" — {esc(event['note'])}" if event["note"] else ""
-        lines.append(f"{esc(event['created_at'])} {arrow} [{esc(event['actor'])}]{note}")
+        note = f"{SEP_PRICE}{esc(trim(event['note'], NAME_BUDGET))}" if event["note"] else ""
+        event_lines.append(f"{esc(event['created_at'])} {arrow} [{esc(event['actor'])}]{note}")
 
-    status = order["status"]
+    def compose() -> str:
+        lines = [*head, "", bold("Items"), *item_lines, "", bold("Recent events"), *event_lines]
+        return screen(ICON.orders, f"Order #{order_id}", "\n".join(lines), crumbs=["Orders"])
+
+    # Worst case (every field made of "&") must still fit one message: shed the
+    # oldest events first, then trailing items, before Telegram would refuse it.
+    text = compose()
+    while len(text) > CARD_TEXT_LIMIT and event_lines:
+        event_lines.pop(0)
+        text = compose()
+    while len(text) > CARD_TEXT_LIMIT and len(item_lines) > 1:
+        item_lines.pop()
+        text = compose()
+
     rows: list[list[InlineKeyboardButton]] = []
     if status == "pending_payment":
         rows.append([_button("Cancel order", cb("adm", "ord", "cancel", order_id))])
@@ -191,8 +215,8 @@ def render_card(
                 _button("Refund", cb("adm", "ord", "refund", order_id)),
             ]
         )
-    rows.append([_button("Back to orders", cb("adm", "o"))])
-    return "\n".join(lines), InlineKeyboardMarkup(rows)
+    rows.append(nav_row(back=cb("adm", "o")))
+    return text, InlineKeyboardMarkup(rows)
 
 
 async def show_card(
@@ -226,14 +250,18 @@ async def _wrong_state(update: Update, context: ContextTypes.DEFAULT_TYPE, order
     await show_card(update, context, order_id, alert=f"Order #{order_id} is now: {status}.")
 
 
-def _confirm_screen(text: str, yes: str, back: str) -> tuple[str, InlineKeyboardMarkup]:
-    return text, InlineKeyboardMarkup([[_button("Confirm", yes), _button("Cancel", back)]])
+def _confirm_screen(title: str, text: str, yes: str, back: str) -> tuple[str, InlineKeyboardMarkup]:
+    """A confirmation: `title` is plain, `text` is already-rendered HTML."""
+    keyboard = InlineKeyboardMarkup(
+        [[_button("Confirm", yes), _button("Cancel", back)], nav_row(back=back)]
+    )
+    return screen(ICON.warning, title, text), keyboard
 
 
 async def _notify_buyer(
     context: ContextTypes.DEFAULT_TYPE, user_id: int, key: str, **kwargs: object
 ) -> bool:
-    return await safe_send(context.bot, user_id, t(key, get_lang(user_id), **kwargs))
+    return await safe_send(context.bot, user_id, t(key, **kwargs))
 
 
 async def action_cancel(
@@ -245,6 +273,7 @@ async def action_cancel(
         return
     if not confirmed:
         text, keyboard = _confirm_screen(
+            "Cancel order?",
             f"Cancel order #{order_id}? Its reserved keys are released. The buyer's cart is NOT "
             "restored, and the buyer is told.",
             cb("adm", "ord", "cancel", order_id, "yes"),
@@ -270,11 +299,11 @@ async def action_retry(update: Update, context: ContextTypes.DEFAULT_TYPE, order
     result = await jobs.retry_delivery_now(context.bot, order_id)
     if result.failed:
         notice = (
-            f"Delivered {len(result.delivered)} item(s); {len(result.failed)} still failing "
-            "(see the logs). It will keep retrying."
+            f"{tn('admin.items_delivered', len(result.delivered))} "
+            f"{t('admin.still_failing', count=len(result.failed))}"
         )
     elif result.delivered:
-        notice = f"Delivered {len(result.delivered)} item(s)."
+        notice = tn("admin.items_delivered", len(result.delivered))
     else:
         notice = "Nothing was sent (a delivery may already be in progress)."
     await show_card(update, context, order_id, notice=notice)
@@ -289,7 +318,7 @@ async def action_resend(update: Update, context: ContextTypes.DEFAULT_TYPE, orde
     for item in card.items:
         if await delivery.deliver_item(context.bot, item["id"]):
             sent += 1
-    notice = f"Re-sent {sent} of {len(card.items)} item(s) to the buyer."
+    notice = tn("admin.resent", len(card.items), sent=sent)
     await show_card(update, context, order_id, notice=notice)
 
 
@@ -305,6 +334,7 @@ async def action_refund(
         return
     if not confirmed:
         text, keyboard = _confirm_screen(
+            "Refund order?",
             f"Refund order #{order_id}? The full {stars(order['total_stars'])} goes back to the "
             "buyer. Sold licence keys will be revoked. Delivered text and files cannot be "
             "unsent. The buyer is told.",
@@ -330,7 +360,8 @@ async def action_refund(
         charge = order["telegram_payment_charge_id"] or "(none)"
         await alert_owner(
             context.bot,
-            f"🚨 {bold('Refund sent but the order was NOT updated')}\nOrder: #{order_id}\n"
+            f"{ICON.alert} {bold('Refund sent but the order was NOT updated')}\n"
+            f"Order: #{order_id}\n"
             f"Charge id: {code(charge)}\nMoney was refunded, status was not updated, "
             "reconcile manually.",
         )

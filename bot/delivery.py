@@ -14,14 +14,18 @@ from typing import NamedTuple
 from telegram import Bot
 from telegram.constants import ParseMode
 
-from .i18n import DEFAULT_LANGUAGE, t
+from .i18n import t
 from .render import bold, code, esc, stars
-from .repo import customers as customers_repo
 from .repo import license_keys as keys_repo
 from .repo import orders as orders_repo
 from .repo import variants as variants_repo
+from .summary import NAME_BUDGET, summary_lines
+from .ui_kit import ICON, delivery_icon, screen, trim
 
 logger = logging.getLogger(__name__)
+
+# Characters per delivery message, header included: under Telegram's 4096 with headroom.
+MESSAGE_LIMIT = 4000
 
 # Order ids with a delivery pass running in this process. An overlapping call
 # for the same order (a retry sweep racing the payment handler's own delivery)
@@ -38,19 +42,71 @@ class MissingContent(Exception):
     """The item has nothing to send (content unset, file id empty, no keys)."""
 
 
-def _lang(user_id: int) -> str:
-    customer = customers_repo.get(user_id)
-    return customer["language"] if customer else DEFAULT_LANGUAGE
-
-
 def _item_name(item: sqlite3.Row) -> str:
     return f"{item['product_name']} — {item['variant_label']}"
 
 
-async def _send_item(bot: Bot, chat_id: int, item: sqlite3.Row, lang: str) -> None:
+def _title(item: sqlite3.Row) -> str:
+    return trim(_item_name(item), 2 * NAME_BUDGET + 3)
+
+
+def _chunk_budget(icon: str, title: str) -> int:
+    """Room left for a body once the (worst-case "(99/99)") header is counted."""
+    header = screen(icon, t("deliver.part_title", name=title, n=99, m=99))
+    return MESSAGE_LIMIT - len(header) - len("\n\n")
+
+
+def _text_chunks(text: str, budget: int) -> list[str]:
+    """Split raw text so every piece is at most `budget` characters once
+    escaped. Customers get all of it: long content becomes several messages."""
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for char in text:
+        width = len(esc(char))
+        if size + width > budget:
+            chunks.append("".join(current))
+            current, size = [], 0
+        current.append(char)
+        size += width
+    if current:
+        chunks.append("".join(current))
+    return chunks
+
+
+def _key_chunks(keys: list[str], budget: int) -> list[list[str]]:
+    """Group keys so each group renders (as <code> lines) within `budget`."""
+    groups: list[list[str]] = []
+    current: list[str] = []
+    size = 0
+    for key in keys:
+        width = len(code(key)) + 1
+        if current and size + width > budget:
+            groups.append(current)
+            current, size = [], 0
+        current.append(key)
+        size += width
+    if current:
+        groups.append(current)
+    return groups
+
+
+async def _send_parts(bot: Bot, chat_id: int, icon: str, title: str, bodies: list[str]) -> None:
+    """One message per body (already-rendered HTML); several get "(n/m)" titles."""
+    total = len(bodies)
+    for number, body in enumerate(bodies, start=1):
+        heading = title if total == 1 else t("deliver.part_title", name=title, n=number, m=total)
+        await bot.send_message(
+            chat_id=chat_id,
+            text=screen(icon, heading, body),
+            parse_mode=ParseMode.HTML,
+        )
+
+
+async def _send_item(bot: Bot, chat_id: int, item: sqlite3.Row) -> None:
     """Send one item's goods. Raises MissingContent when there is nothing to
     send, or whatever the Telegram call raises."""
-    name = bold(_item_name(item))
+    title = _title(item)
     kind = item["delivery_kind"]
     variant = variants_repo.get(item["variant_id"]) if item["variant_id"] is not None else None
 
@@ -58,11 +114,9 @@ async def _send_item(bot: Bot, chat_id: int, item: sqlite3.Row, lang: str) -> No
         text = (variant["delivery_text"] or "") if variant else ""
         if not text.strip():
             raise MissingContent("delivery text is empty")
-        await bot.send_message(
-            chat_id=chat_id,
-            text=t("deliver.text", lang, name=name, body=esc(text)),
-            parse_mode=ParseMode.HTML,
-        )
+        icon = delivery_icon("text")
+        bodies = [esc(chunk) for chunk in _text_chunks(text, _chunk_budget(icon, title))]
+        await _send_parts(bot, chat_id, icon, title, bodies)
     elif kind == "file":
         file_id = (variant["delivery_file_id"] or "") if variant else ""
         if not file_id:
@@ -70,18 +124,17 @@ async def _send_item(bot: Bot, chat_id: int, item: sqlite3.Row, lang: str) -> No
         await bot.send_document(
             chat_id=chat_id,
             document=file_id,
-            caption=t("deliver.file_caption", lang, name=name),
+            caption=screen(delivery_icon("file"), title),
             parse_mode=ParseMode.HTML,
         )
     elif kind == "key":
         keys = keys_repo.get_sold_keys(item["id"])
         if len(keys) < item["quantity"]:
             raise MissingContent(f"{len(keys)} of {item['quantity']} sold keys found")
-        await bot.send_message(
-            chat_id=chat_id,
-            text=t("deliver.keys", lang, name=name, keys="\n".join(code(k) for k in keys)),
-            parse_mode=ParseMode.HTML,
-        )
+        icon = delivery_icon("key")
+        groups = _key_chunks(keys, _chunk_budget(icon, title))
+        bodies = ["\n".join(code(k) for k in group) for group in groups]
+        await _send_parts(bot, chat_id, icon, title, bodies)
     else:
         raise MissingContent(f"unknown delivery kind {kind!r}")
 
@@ -104,7 +157,6 @@ async def _deliver_order(bot: Bot, order_id: int) -> DeliveryResult:
         return DeliveryResult([], [])
 
     chat_id = order["user_id"]
-    lang = _lang(chat_id)
     delivered: list[int] = []
     failed: list[int] = []
     for item in orders_repo.list_undelivered_items(order_id):
@@ -112,7 +164,7 @@ async def _deliver_order(bot: Bot, order_id: int) -> DeliveryResult:
             logger.info("Delivery of order %s stopped: it is no longer paid", order_id)
             return DeliveryResult(delivered, failed)
         try:
-            await _send_item(bot, chat_id, item, lang)
+            await _send_item(bot, chat_id, item)
         except Exception:
             logger.error(
                 "Delivery failed (order_id=%s, order_item_id=%s)",
@@ -136,7 +188,7 @@ async def _deliver_order(bot: Bot, order_id: int) -> DeliveryResult:
             logger.info("Order %s left 'paid' before it could be marked delivered", order_id)
             moved = False
         if moved:
-            await _send_receipt(bot, order_id, lang)
+            await _send_receipt(bot, order_id)
     return DeliveryResult(delivered, failed)
 
 
@@ -153,7 +205,7 @@ async def deliver_item(bot: Bot, order_item_id: int) -> bool:
     if item is None or item["order_status"] not in ("paid", "delivered"):
         return False
     try:
-        await _send_item(bot, item["user_id"], item, _lang(item["user_id"]))
+        await _send_item(bot, item["user_id"], item)
     except Exception:
         logger.error(
             "Re-send failed (order_id=%s, order_item_id=%s)",
@@ -165,14 +217,19 @@ async def deliver_item(bot: Bot, order_item_id: int) -> bool:
     return True
 
 
-async def _send_receipt(bot: Bot, order_id: int, lang: str) -> None:
+async def _send_receipt(bot: Bot, order_id: int) -> None:
     order, items = orders_repo.get_with_items(order_id)
     if order is None:
         return
-    lines = "\n".join(
-        t("deliver.receipt_line", lang, name=esc(_item_name(i)), qty=i["quantity"]) for i in items
+    lines = summary_lines(
+        items,
+        _item_name,
+        lambda i: i["quantity"],
+        lambda i: i["line_total_stars"],
     )
-    text = t("deliver.receipt", lang, id=order_id, items=lines, total=stars(order["total_stars"]))
+    total = bold(t("deliver.total", total=stars(order["total_stars"])))
+    body = "\n".join([esc(t("deliver.receipt")), "", *lines, "", total])
+    text = screen(ICON.ok, t("deliver.receipt_title", id=order_id), body, step=(3, 3, "Delivery"))
     try:
         await bot.send_message(chat_id=order["user_id"], text=text, parse_mode=ParseMode.HTML)
     except Exception:

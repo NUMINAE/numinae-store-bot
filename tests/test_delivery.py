@@ -10,7 +10,6 @@ import pytest
 from telegram.error import Forbidden, NetworkError
 
 from bot import delivery
-from bot.repo import customers as customers_repo
 from bot.repo import orders as orders_repo
 from bot.repo import variants as variants_repo
 
@@ -268,7 +267,7 @@ async def test_resend_failure_returns_false_and_logs(db, caplog):
     assert any("Re-send failed" in r.getMessage() for r in caplog.records)
 
 
-# --- escaping & language ----------------------------------------------------------------------
+# --- escaping ----------------------------------------------------------------------
 
 
 async def test_hostile_delivery_text_is_escaped(db):
@@ -295,15 +294,6 @@ async def test_hostile_keys_and_names_are_escaped_in_code_tags_and_receipt(db):
     assert "&lt;b&gt;&amp; — Personal" in receipt
     for message in (keys_message, receipt):
         assert "<b>&" not in message.replace("<b>&lt;", "")
-
-
-async def test_russian_customers_get_russian_receipts(db):
-    order_id = place_order(USER, {TEXT: 1})
-    customers_repo.set_language(USER, "ru")
-    pay(order_id)
-    bot = fake_bot()
-    await delivery.deliver_order(bot, order_id)
-    assert "Спасибо" in _texts(bot)[-1]
 
 
 # --- the in-flight guard ----------------------------------------------------------------------

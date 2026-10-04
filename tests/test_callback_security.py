@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from bot.handlers import admin_catalogue, cart, catalogue, checkout, common, library
+from bot.handlers import admin_catalogue, cart, catalogue, checkout, library
 from bot.keyboards import CALLBACK_DATA_MAX_BYTES
 
 from .conftest import OWNER_ID
@@ -111,7 +111,6 @@ NAMESPACES: dict[str, list[str]] = {
     "cart": ["view", "inc", "dec", "remove", "clear", "checkout"],
     "co": ["start", "pay", "resume", "cancel", "cancelyes", "cancelno", "mockpay"],
     "lib": ["list", "item", "send"],
-    "lang": ["show", "set"],
     "adm": sorted({route.split(":")[1] for route in ADM_ROUTES}),
 }
 HANDLERS = {
@@ -119,7 +118,6 @@ HANDLERS = {
     "cart": cart.route,
     "co": checkout.route,
     "lib": library.route,
-    "lang": common.lang_route,
     "adm": admin_catalogue.route,
 }
 

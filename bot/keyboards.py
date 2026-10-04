@@ -15,31 +15,20 @@ from telegram import ReplyKeyboardMarkup
 CALLBACK_DATA_MAX_BYTES = 64
 MAX_ROW_ID = 2**63 - 1  # largest SQLite INTEGER
 
-# Persistent reply-keyboard labels for top-level customer navigation, one
-# triple per language. Matched by exact string in handlers/router.py — never
-# used as callback_data, so they aren't subject to the 64-byte limit above.
-# A customer can have a stale keyboard cached in the OTHER language (they
-# just switched, or the bot restarted mid-session) — MENU_ACTION_BY_LABEL
-# below maps every label in every language to the same action, so router.py
-# matches against the full set of six, not just the current language.
-MENU_LABELS: dict[str, tuple[str, str, str]] = {
-    "en": ("Browse Products", "Shopping Cart", "My Library"),
-    "ru": ("Просмотр товаров", "Корзина", "Моя библиотека"),
-}
+# Persistent reply-keyboard labels for top-level customer navigation. Matched
+# by EXACT full-string equality in handlers/router.py (never substring, prefix
+# or case-folded) and never used as callback_data, so they aren't subject to
+# the 64-byte limit above.
+MENU_LABELS: tuple[str, str, str] = ("Browse Products", "Shopping Cart", "My Library")
 
-MENU_ACTION_BY_LABEL: dict[str, str] = {}
-for _labels in MENU_LABELS.values():
-    _browse, _cart, _library = _labels
-    MENU_ACTION_BY_LABEL[_browse] = "browse"
-    MENU_ACTION_BY_LABEL[_cart] = "cart"
-    MENU_ACTION_BY_LABEL[_library] = "library"
-del _labels, _browse, _cart, _library
+MENU_ACTION_BY_LABEL: dict[str, str] = dict(
+    zip(MENU_LABELS, ("browse", "cart", "library"), strict=True)
+)
 
 
-def main_reply_keyboard(lang: str) -> ReplyKeyboardMarkup:
-    labels = MENU_LABELS.get(lang, MENU_LABELS["en"])
+def main_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        [list(labels)],
+        [list(MENU_LABELS)],
         resize_keyboard=True,
         is_persistent=True,
     )

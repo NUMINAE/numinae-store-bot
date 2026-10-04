@@ -7,6 +7,7 @@ import pytest
 from bot.handlers import library, router
 from bot.keyboards import MENU_LABELS
 from bot.repo import orders as orders_repo
+from bot.ui_kit import ICON
 
 from .flow import Flow
 from .helpers import add_customer, make_context
@@ -39,7 +40,7 @@ def item_ids(order_id: int) -> list[int]:
 async def test_an_empty_library_is_friendly_and_offers_browse(flow):
     await flow.tap(library.route, "lib:list:0")
     assert "library is empty" in flow.text
-    assert "Browse products" in flow.labels() and "Back to menu" in flow.labels()
+    assert "Browse products" in flow.labels() and "🏠 Home" in flow.labels()
 
 
 async def test_items_are_listed_newest_first_with_their_status(flow, db):
@@ -52,8 +53,8 @@ async def test_items_are_listed_newest_first_with_their_status(flow, db):
     await flow.tap(library.route, "lib:list:0")
 
     labels = flow.labels()
-    assert labels[0] == "Orbit Icons Pro — Personal · Being delivered"
-    assert labels[1] == "Neon Portrait Prompt Pack — Personal · Delivered"
+    assert labels[0] == f"{ICON.paid} Orbit Icons Pro — Personal · Being delivered"
+    assert labels[1] == f"{ICON.delivered} Neon Portrait Prompt Pack — Personal · Delivered"
 
 
 async def test_paging_is_five_per_page_with_arrows_omitted_at_the_edges(flow):
@@ -67,14 +68,14 @@ async def test_paging_is_five_per_page_with_arrows_omitted_at_the_edges(flow):
     item_buttons = [d for _, d in flow.buttons if d.startswith("lib:item:")]
     assert len(item_buttons) == 5
     assert "◀" not in flow.labels() and "▶" in flow.labels()
-    assert "Page 1/2" in flow.labels()
+    assert "1 / 2" in flow.labels()
 
     await flow.tap(library.route, "lib:list:1")
     assert len([d for _, d in flow.buttons if d.startswith("lib:item:")]) == 2
     assert "◀" in flow.labels() and "▶" not in flow.labels()
 
     await flow.tap(library.route, "lib:list:99")  # out of range clamps to the last page
-    assert "Page 2/2" in flow.labels()
+    assert "2 / 2" in flow.labels()
 
 
 async def test_a_single_page_has_no_arrows_or_page_label(flow):
@@ -89,16 +90,16 @@ async def test_a_delivered_item_screen_offers_send_again(flow):
     (item_id,) = item_ids(order_id)
     await flow.tap(library.route, f"lib:item:{item_id}")
     assert "Orbit Icons Pro — Personal" in flow.text
-    assert f"Order #{order_id}" in flow.text and "Status: Delivered" in flow.text
+    assert f"Order #{order_id}" in flow.text and f"Status: {ICON.delivered} Delivered" in flow.text
     assert f"lib:send:{item_id}" in [d for _, d in flow.buttons]
-    assert "Back to library" in flow.labels()
+    assert flow.data_for("‹ Back") == "lib:list:0"
 
 
 async def test_a_paid_but_undelivered_item_says_being_delivered_and_cannot_be_sent(flow):
     order_id = buy({TEXT: 1}, delivered=False)
     (item_id,) = item_ids(order_id)
     await flow.tap(library.route, f"lib:item:{item_id}")
-    assert "Status: Being delivered" in flow.text
+    assert f"{ICON.paid} Being delivered" in flow.text
     assert not any(d.startswith("lib:send:") for _, d in flow.buttons)
 
     await flow.tap(library.route, f"lib:send:{item_id}")  # a stale or crafted tap
@@ -114,7 +115,7 @@ async def test_refunded_items_say_refunded_and_offer_no_send(flow):
     await flow.tap(library.route, "lib:list:0")
     assert flow.labels()[0].endswith("· Refunded")
     await flow.tap(library.route, f"lib:item:{item_id}")
-    assert "Status: Refunded" in flow.text
+    assert f"Status: {ICON.refunded} Refunded" in flow.text
     assert not any(d.startswith("lib:send:") for _, d in flow.buttons)
 
     await flow.tap(library.route, f"lib:send:{item_id}")
@@ -153,14 +154,9 @@ async def test_someone_elses_item_and_a_missing_item_get_the_identical_response(
 
 
 async def test_the_reply_keyboard_button_opens_the_library(flow):
-    for lang in ("en", "ru"):
-        label = MENU_LABELS[lang][2]
-        await flow.send(router.route_text, label)
-    sent = flow.sent_messages()
-    assert len(sent) == 2 and all(
-        "library is empty" in str(c.kwargs["text"]).lower() or "пуста" in str(c.kwargs["text"])
-        for c in sent
-    )
+    await flow.send(router.route_text, MENU_LABELS[2])
+    (sent,) = flow.sent_messages()
+    assert "library is empty" in str(sent.kwargs["text"]).lower()
 
 
 async def test_malformed_library_callbacks_alert(flow):

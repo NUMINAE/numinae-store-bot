@@ -11,6 +11,7 @@ import sqlite3
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from ..i18n import tn
 from ..keyboards import cb, parse_callback, parse_cb_id
 from ..limits import MAX_ORDER_STARS
 from ..render import bold, esc, stars
@@ -23,14 +24,30 @@ from ..repo import variants as variants_repo
 from ..security import owner_only
 from ..tg import require_data, require_message, require_query, require_text, require_user
 from ..ui import show_screen
+from ..ui_kit import (
+    ICON,
+    SEP_META,
+    SEP_PRICE,
+    btn_label,
+    fit_lines,
+    nav_row,
+    pager,
+    screen,
+    trim,
+    trim_escaped,
+)
 from . import admin_common, admin_orders, admin_settings, admin_stats, admin_uploads
 from .admin_common import Invalid
 
 PRODUCTS_PAGE_SIZE = 5
+NAME_BUDGET = 60
+DESCRIPTION_BUDGET = 900  # escaped characters
+EDITION_LINES_BUDGET = 1500  # escaped characters
+MAX_EDITIONS_SHOWN = 20
 
 _DELIVERY_NAMES = {"file": "File", "key": "Keys", "text": "Text"}
 _KIND_BY_CODE = {"f": "file", "k": "key", "t": "text"}
-_PRICE_PROMPT = f"Send the price in whole Stars, e.g. 75 or ⭐75 (1–{MAX_ORDER_STARS})."
+_PRICE_PROMPT = f"Send the price in whole Stars, e.g. 75 or {ICON.stars}75 (1–{MAX_ORDER_STARS})."
 _DELIVERY_TEXT_PROMPT = (
     "Send the text customers receive after paying — e.g. a download link or instructions "
     "(1–2000 characters)."
@@ -63,15 +80,13 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     prod_count = products_repo.count_all()
 
     lines = [
-        bold("Admin dashboard"),
-        "",
-        f"Catalogue — {cat_count} categor{'y' if cat_count == 1 else 'ies'}, "
-        f"{prod_count} product{'' if prod_count == 1 else 's'}",
+        f"Catalogue{SEP_PRICE}{tn('admin.categories', cat_count)}, "
+        f"{tn('admin.products', prod_count)}"
     ]
     attention = orders_repo.attention_count()
     if attention:
-        lines.append(f"{attention} paid order{'' if attention == 1 else 's'} awaiting delivery")
-    text = "\n".join(lines)
+        lines.append(tn("admin.paid_awaiting", attention))
+    text = screen(ICON.admin, "Admin dashboard", "\n".join(lines))
     orders_label = f"Orders ({attention} need attention)" if attention else "Orders"
 
     keyboard = InlineKeyboardMarkup(
@@ -80,6 +95,7 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             [InlineKeyboardButton(orders_label, callback_data=cb("adm", "o"))],
             [InlineKeyboardButton("Stats", callback_data=cb("adm", "st"))],
             [InlineKeyboardButton("Settings", callback_data=cb("adm", "set"))],
+            nav_row(),
         ]
     )
     await show_screen(update, context, text=text, keyboard=keyboard)
@@ -95,12 +111,17 @@ async def show_category_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
     buttons = []
     for c in cats:
         product_count = categories_repo.count_products(c["id"])
-        label = f"{c['name']} ({product_count}) · {_status_word(c['is_active'])}"
+        label = btn_label(f"{c['name']} ({product_count}){SEP_META}{_status_word(c['is_active'])}")
         buttons.append([InlineKeyboardButton(label, callback_data=cb("adm", "cat", "v", c["id"]))])
     buttons.append([InlineKeyboardButton("Add category", callback_data=cb("adm", "cat", "add"))])
-    buttons.append([InlineKeyboardButton("Back to admin", callback_data=cb("adm", "home"))])
+    buttons.append(nav_row(back=cb("adm", "home")))
 
-    text = bold("Categories") if cats else f"{bold('Categories')}\n\nNo categories yet."
+    text = screen(
+        ICON.catalogue,
+        "Categories",
+        "" if cats else "No categories yet.",
+        crumbs=["Admin"],
+    )
     await show_screen(update, context, text=text, keyboard=InlineKeyboardMarkup(buttons))
 
 
@@ -113,15 +134,20 @@ async def show_category_detail(
         return
 
     product_count = categories_repo.count_products(category_id)
-    lines = [bold(category["name"])]
-    lines.append(esc(category["description"]) if category["description"] else "(no description)")
-    lines += [
+    description = category["description"]
+    lines = [
+        esc(trim_escaped(description, DESCRIPTION_BUDGET)) if description else "(no description)",
         "",
         f"Sort order: {category['sort_order']}",
         f"Status: {_status_word(category['is_active'])}",
         f"Products: {product_count}",
     ]
-    text = "\n".join(lines)
+    text = screen(
+        ICON.catalogue,
+        trim(category["name"], NAME_BUDGET),
+        "\n".join(lines),
+        crumbs=["Categories"],
+    )
 
     keyboard = InlineKeyboardMarkup(
         [
@@ -148,7 +174,7 @@ async def show_category_detail(
                     callback_data=cb("adm", "pr", category_id, 0),
                 )
             ],
-            [InlineKeyboardButton("Back to categories", callback_data=cb("adm", "cat"))],
+            nav_row(back=cb("adm", "cat")),
         ]
     )
     await show_screen(update, context, text=text, keyboard=keyboard)
@@ -156,7 +182,12 @@ async def show_category_detail(
 
 async def cat_add_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     pending_repo.set(require_user(update).id, "cat_create_name")
-    await _prompt(update, context, "What's the name of the new category? (1–60 characters)")
+    await _prompt(
+        update,
+        context,
+        "What's the name of the new category? (1–60 characters)",
+        title="New category",
+    )
 
 
 async def cat_edit_name_prompt(
@@ -197,17 +228,20 @@ async def cat_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE, categor
 
     product_count = categories_repo.count_products(category_id)
     variant_count = categories_repo.count_purchasable_variants(category_id)
-    text = (
-        f'Deactivate "{esc(category["name"])}"? This hides {product_count} '
-        f"product{'' if product_count == 1 else 's'} and {variant_count} "
-        f"edition{'' if variant_count == 1 else 's'} from customers."
+    text = screen(
+        ICON.warning,
+        "Deactivate category?",
+        f'Deactivating "{esc(trim(category["name"], NAME_BUDGET))}" hides '
+        f"{tn('admin.products', product_count)} and {tn('admin.editions', variant_count)}"
+        " from customers.",
     )
     keyboard = InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("Confirm", callback_data=cb("adm", "cat", "tgc", category_id)),
                 InlineKeyboardButton("Cancel", callback_data=cb("adm", "cat", "v", category_id)),
-            ]
+            ],
+            nav_row(back=cb("adm", "cat", "v", category_id)),
         ]
     )
     await show_screen(update, context, text=text, keyboard=keyboard)
@@ -278,32 +312,28 @@ async def show_product_list(
         )
         for p in rows:
             variant_count = products_repo.count_variants(p["id"])
-            label = f"{p['name']} ({variant_count}) · {_status_word(p['is_active'])}"
+            label = btn_label(
+                f"{p['name']} ({variant_count}){SEP_META}{_status_word(p['is_active'])}"
+            )
             buttons.append(
                 [InlineKeyboardButton(label, callback_data=cb("adm", "pr", "v", p["id"]))]
             )
 
-        nav = []
-        if page > 0:
-            nav.append(
-                InlineKeyboardButton("◀", callback_data=cb("adm", "pr", category_id, page - 1))
-            )
-        nav.append(InlineKeyboardButton(f"Page {page + 1}/{total_pages}", callback_data="noop"))
-        if page < total_pages - 1:
-            nav.append(
-                InlineKeyboardButton("▶", callback_data=cb("adm", "pr", category_id, page + 1))
-            )
-        buttons.append(nav)
+        pager_row = pager(page, total_pages, lambda n: cb("adm", "pr", category_id, n))
+        if pager_row:
+            buttons.append(pager_row)
 
     buttons.append(
         [InlineKeyboardButton("Add product", callback_data=cb("adm", "pr", "add", category_id))]
     )
-    buttons.append(
-        [InlineKeyboardButton("Back to category", callback_data=cb("adm", "cat", "v", category_id))]
-    )
+    buttons.append(nav_row(back=cb("adm", "cat", "v", category_id)))
 
-    heading = bold(f"Products in {category['name']}")
-    text = heading if total else f"{heading}\n\nNo products yet."
+    text = screen(
+        ICON.catalogue,
+        "Products",
+        "" if total else "No products yet.",
+        crumbs=["Categories", trim(category["name"], NAME_BUDGET)],
+    )
     await show_screen(update, context, text=text, keyboard=InlineKeyboardMarkup(buttons))
 
 
@@ -317,25 +347,37 @@ async def show_product_detail(
     category = categories_repo.get(product["category_id"])
     variants = variants_repo.list_all_for_product(product_id)
 
-    lines = [bold(product["name"])]
-    lines.append(esc(product["description"]) if product["description"] else "(no description)")
-    lines += [
+    description = product["description"]
+    lines = [
+        esc(trim_escaped(description, DESCRIPTION_BUDGET)) if description else "(no description)",
         "",
-        f"Category: {esc(category['name']) if category else '(unknown)'}",
+        f"Category: {esc(trim(category['name'], NAME_BUDGET)) if category else '(unknown)'}",
         f"Sort order: {product['sort_order']}",
         f"Status: {_status_word(product['is_active'])}",
     ]
 
     if variants:
-        lines += ["", bold("Editions:")]
-        for v in variants:
-            lines.append(
-                f"{esc(v['label'])} — {stars(v['price_stars'])} · "
-                f"{_DELIVERY_NAMES[v['delivery_kind']]} · {_status_word(v['is_active'])}"
-            )
+        edition_lines = [
+            f"{esc(trim(v['label'], NAME_BUDGET))}{SEP_PRICE}{stars(v['price_stars'])}"
+            f"{SEP_META}{_DELIVERY_NAMES[v['delivery_kind']]}"
+            f"{SEP_META}{_status_word(v['is_active'])}"
+            for v in variants[:MAX_EDITIONS_SHOWN]
+        ]
+        shown, _ = fit_lines(edition_lines, EDITION_LINES_BUDGET)
+        lines += ["", bold("Editions:"), *shown]
+        if len(variants) > len(shown):
+            lines.append(esc(tn("admin.more_editions", len(variants) - len(shown))))
     else:
         lines += ["", "This product has no editions yet — add one?"]
-    text = "\n".join(lines)
+    text = screen(
+        ICON.catalogue,
+        trim(product["name"], NAME_BUDGET),
+        "\n".join(lines),
+        crumbs=[
+            "Categories",
+            trim(category["name"], NAME_BUDGET) if category else "(unknown)",
+        ],
+    )
 
     buttons = [
         [
@@ -367,13 +409,7 @@ async def show_product_detail(
             )
         ]
     )
-    buttons.append(
-        [
-            InlineKeyboardButton(
-                "Back to products", callback_data=cb("adm", "pr", product["category_id"], 0)
-            )
-        ]
-    )
+    buttons.append(nav_row(back=cb("adm", "pr", product["category_id"], 0)))
 
     await show_screen(update, context, text=text, keyboard=InlineKeyboardMarkup(buttons))
 
@@ -382,7 +418,12 @@ async def prod_add_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, category_id: int
 ) -> None:
     pending_repo.set(require_user(update).id, "prod_create_name", context_id=category_id)
-    await _prompt(update, context, "What's the name of the new product? (1–60 characters)")
+    await _prompt(
+        update,
+        context,
+        "What's the name of the new product? (1–60 characters)",
+        title="New product",
+    )
 
 
 async def prod_edit_name_prompt(
@@ -421,14 +462,21 @@ async def prod_move_picker(
     buttons = [
         [
             InlineKeyboardButton(
-                f"{c['name']}{' (current)' if c['id'] == product['category_id'] else ''}",
+                btn_label(
+                    f"{c['name']}{' (current)' if c['id'] == product['category_id'] else ''}"
+                ),
                 callback_data=cb("adm", "pr", "mvto", product_id, c["id"]),
             )
         ]
         for c in cats
     ]
     buttons.append([InlineKeyboardButton("Cancel", callback_data=cb("adm", "pr", "v", product_id))])
-    text = f"Move {bold(product['name'])} to which category?"
+    buttons.append(nav_row(back=cb("adm", "pr", "v", product_id)))
+    text = screen(
+        ICON.catalogue,
+        "Move product",
+        f"Move {bold(trim(product['name'], NAME_BUDGET))} to which category?",
+    )
     await show_screen(update, context, text=text, keyboard=InlineKeyboardMarkup(buttons))
 
 
@@ -451,16 +499,19 @@ async def prod_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE, produc
         return
 
     variant_count = products_repo.count_purchasable_variants(product_id)
-    text = (
-        f'Deactivate "{esc(product["name"])}"? This hides {variant_count} '
-        f"edition{'' if variant_count == 1 else 's'} from customers."
+    text = screen(
+        ICON.warning,
+        "Deactivate product?",
+        f'Deactivating "{esc(trim(product["name"], NAME_BUDGET))}" hides '
+        f"{tn('admin.editions', variant_count)} from customers.",
     )
     keyboard = InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("Confirm", callback_data=cb("adm", "pr", "tgc", product_id)),
                 InlineKeyboardButton("Cancel", callback_data=cb("adm", "pr", "v", product_id)),
-            ]
+            ],
+            nav_row(back=cb("adm", "pr", "v", product_id)),
         ]
     )
     await show_screen(update, context, text=text, keyboard=keyboard)
@@ -549,17 +600,21 @@ async def show_variant_list(
 
     buttons = []
     for v in variants:
-        label = f"{v['label']} — {stars(v['price_stars'])} · {_status_word(v['is_active'])}"
+        label = btn_label(
+            f"{v['label']}{SEP_PRICE}{stars(v['price_stars'])}{SEP_META}{_status_word(v['is_active'])}"
+        )
         buttons.append([InlineKeyboardButton(label, callback_data=cb("adm", "va", "v", v["id"]))])
     buttons.append(
         [InlineKeyboardButton("Add edition", callback_data=cb("adm", "va", "add", product_id))]
     )
-    buttons.append(
-        [InlineKeyboardButton("Back to product", callback_data=cb("adm", "pr", "v", product_id))]
-    )
+    buttons.append(nav_row(back=cb("adm", "pr", "v", product_id)))
 
-    heading = bold(f"Editions — {product['name']}")
-    text = heading if variants else f"{heading}\n\nNo editions yet."
+    text = screen(
+        ICON.catalogue,
+        "Editions",
+        "" if variants else "No editions yet.",
+        crumbs=["Categories", trim(product["name"], NAME_BUDGET)],
+    )
     await show_screen(update, context, text=text, keyboard=InlineKeyboardMarkup(buttons))
 
 
@@ -572,7 +627,6 @@ async def show_variant_detail(
         return
 
     lines = [
-        bold(variant["label"]),
         f"Price: {stars(variant['price_stars'])}",
         f"Delivery: {_DELIVERY_NAMES[variant['delivery_kind']]}",
     ]
@@ -584,7 +638,7 @@ async def show_variant_detail(
         )
     elif variant["delivery_kind"] == "file":
         if variant["delivery_file_id"]:
-            name = variant["delivery_file_name"] or "(unnamed)"
+            name = trim(variant["delivery_file_name"] or "(unnamed)", NAME_BUDGET)
             lines.append(f"File: {esc(name)}")
             lines.append("Replacing the file updates what existing buyers can re-download.")
         else:
@@ -595,8 +649,13 @@ async def show_variant_detail(
     ]
     warning = _delivery_warning(variant)
     if warning:
-        lines += ["", f"⚠️ {warning}"]
-    text = "\n".join(lines)
+        lines += ["", f"{ICON.warning} {esc(warning)}"]
+    text = screen(
+        ICON.catalogue,
+        trim(variant["label"], NAME_BUDGET),
+        "\n".join(lines),
+        crumbs=["Editions"],
+    )
 
     rows = [
         [
@@ -626,13 +685,7 @@ async def show_variant_detail(
         rows.append(
             [InlineKeyboardButton("Add keys", callback_data=cb("adm", "va", "ak", variant_id))]
         )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                "Back to editions", callback_data=cb("adm", "va", variant["product_id"])
-            )
-        ]
-    )
+    rows.append(nav_row(back=cb("adm", "va", variant["product_id"])))
     await show_screen(update, context, text=text, keyboard=InlineKeyboardMarkup(rows))
 
 
@@ -656,6 +709,8 @@ async def var_add_label_prompt(
         update,
         context,
         'What\'s the label for the new edition? (e.g. "Personal", 1–60 characters)',
+        title="New edition",
+        step=(1, 3),
     )
 
 
@@ -693,22 +748,24 @@ async def var_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE, variant
 
     product = products_repo.get(variant["product_id"])
     active_count = products_repo.count_active_variants(variant["product_id"])
-    product_name = esc(product["name"]) if product else "this product"
+    product_name = esc(trim(product["name"], NAME_BUDGET)) if product else "this product"
 
     if active_count <= 1:
-        text = (
+        body = (
             f'This is the only edition of "{product_name}". Deactivating it will '
             "hide the product from customers."
         )
     else:
-        text = f'Deactivate "{esc(variant["label"])}" for "{product_name}"?'
+        body = f'Deactivate "{esc(trim(variant["label"], NAME_BUDGET))}" for "{product_name}"?'
+    text = screen(ICON.warning, "Deactivate edition?", body)
 
     keyboard = InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("Confirm", callback_data=cb("adm", "va", "tgc", variant_id)),
                 InlineKeyboardButton("Cancel", callback_data=cb("adm", "va", "v", variant_id)),
-            ]
+            ],
+            nav_row(back=cb("adm", "va", "v", variant_id)),
         ]
     )
     await show_screen(update, context, text=text, keyboard=keyboard)
@@ -962,8 +1019,10 @@ async def _apply_var_create_label(update, context, target_id, context_id, raw) -
     await _prompt(
         update,
         context,
-        f'What\'s the price for "{esc(value)}"? '
-        f"Send whole Stars, e.g. 75 or ⭐75 (1–{MAX_ORDER_STARS}).",
+        f'What\'s the price for "{esc(trim(value, NAME_BUDGET))}"? '
+        f"Send whole Stars, e.g. 75 or {ICON.stars}75 (1–{MAX_ORDER_STARS}).",
+        title="New edition",
+        step=(2, 3),
     )
 
 
@@ -989,11 +1048,16 @@ async def _apply_var_create_price(update, context, target_id, context_id, raw) -
                 InlineKeyboardButton("Text", callback_data=cb("adm", "va", "ck", "t")),
             ],
             [_cancel_button()],
+            nav_row(),
         ]
     )
-    text = (
-        f'How is "{esc(label)}" ({stars(cents)}) delivered? This cannot be changed later.\n\n'
-        "File — an uploaded file. Keys — one licence key per unit. Text — a message you write."
+    text = screen(
+        ICON.catalogue,
+        "Delivery type",
+        f'How is "{esc(trim(label, NAME_BUDGET))}" ({stars(cents)}) delivered? '
+        "This cannot be changed later.\n\n"
+        "File — an uploaded file. Keys — one licence key per unit. Text — a message you write.",
+        step=(3, 3),
     )
     await show_screen(update, context, text=text, keyboard=keyboard)
 

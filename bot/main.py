@@ -20,7 +20,7 @@ from telegram.ext import (
     filters,
 )
 
-from . import jobs, ratelimit
+from . import jobs, profile, ratelimit
 from .config import get_settings
 from .db import MigrationError, init_db
 from .handlers import (
@@ -35,9 +35,7 @@ from .handlers import (
 )
 from .handlers import cart as cart_handlers
 from .handlers.common import (
-    get_lang,
     help_placeholder,
-    lang_route,
     menu_show,
     start,
     unknown_callback,
@@ -45,7 +43,7 @@ from .handlers.common import (
 from .i18n import t
 from .keyboards import main_reply_keyboard
 from .payments.registry import build_provider
-from .redact import RedactingFormatter
+from .redact import RedactingFormatter, redact
 from .repo import admin_pending as admin_pending_repo
 from .seed_demo import seed_demo
 from .tg import IgnoreUpdate
@@ -102,12 +100,20 @@ async def _admin_route(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     had_pending = admin_pending_repo.get(owner_id) is not None
     await admin_catalogue.route(update, context)
     if had_pending and admin_pending_repo.get(owner_id) is None:
-        lang = get_lang(owner_id)
         await context.bot.send_message(
             chat_id=owner_id,
-            text=t("common.menu_restored", lang),
-            reply_markup=main_reply_keyboard(lang),
+            text=t("common.menu_restored"),
+            reply_markup=main_reply_keyboard(),
         )
+
+
+async def _post_init(application: Application) -> None:
+    """Sync the bot's Telegram profile once at startup. Best-effort: nothing
+    here can stop the bot from starting."""
+    try:
+        await profile.sync_profile(application.bot, get_settings().owner_id)
+    except Exception as exc:
+        logger.warning("Profile sync failed: %s", redact(str(exc)))
 
 
 def build_application() -> Application:
@@ -117,6 +123,7 @@ def build_application() -> Application:
         Application.builder()
         .token(settings.bot_token.get_secret_value())
         .defaults(defaults)
+        .post_init(_post_init)
         .build()
     )
 
@@ -134,6 +141,7 @@ def build_application() -> Application:
         CommandHandler("admin", admin_catalogue.dashboard, filters=filters.User(settings.owner_id))
     )
     application.add_handler(CommandHandler("order", admin_orders.find_order))
+    application.add_handler(CommandHandler("library", library.library_command))
     application.add_handler(CommandHandler("paysupport", payments.paysupport))
     # /sweep is owner-only through its decorator, so a stranger is told so
     # rather than silently ignored.
@@ -150,7 +158,6 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(library.route, pattern=r"^lib:"))
     application.add_handler(CallbackQueryHandler(menu_show, pattern=r"^menu:"))
     application.add_handler(CallbackQueryHandler(help_placeholder, pattern=r"^help:"))
-    application.add_handler(CallbackQueryHandler(lang_route, pattern=r"^lang:"))
 
     # The single free-text handler must come before the catch-all too.
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, router.route_text))

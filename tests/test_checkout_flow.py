@@ -57,7 +57,7 @@ async def test_full_mock_journey_browse_to_library_and_resend(flow, db):
     await flow.tap(cart.route, "cart:view")
     assert "Subtotal: ⭐ 225" in flow.text
     await flow.tap(checkout.route, flow.data_for("Checkout"))
-    assert "Review your order" in flow.text
+    assert "Step 1 of 3 · Review" in flow.text
     assert "Neon Portrait Prompt Pack — Personal × 1 — ⭐ 75" in flow.text
     assert "Total: ⭐ 225" in flow.text
     assert "Demo mode: no real payment" in flow.text
@@ -82,7 +82,7 @@ async def test_full_mock_journey_browse_to_library_and_resend(flow, db):
     assert "example.com/demo/neon-prompts-personal" in delivered
     keys = re.findall(r"<code>(NUMI-DEMO-ORBP-\d{4})</code>", delivered)
     assert len(keys) == 3 and len(set(keys)) == 3  # three distinct keys, each in <code>
-    assert f"Order #{order['id']} is complete" in delivered
+    assert f"Order #{order['id']} complete" in delivered
     assert any(f"New paid order #{order['id']}" in m for m in texts_to(flow, OWNER_ID))
 
     # My Library -> item -> send again
@@ -113,7 +113,7 @@ async def test_the_purchased_keys_are_sold_and_the_cart_is_empty_afterwards(flow
 async def test_an_empty_cart_cannot_check_out(flow):
     await flow.tap(checkout.route, "co:start")
     assert "nothing in your cart" in flow.text
-    assert "Browse products" in flow.labels() and "Back to cart" in flow.labels()
+    assert "Browse products" in flow.labels() and flow.data_for("‹ Back") == "cart:view"
 
 
 async def test_a_cart_of_only_unavailable_lines_cannot_check_out(flow):
@@ -137,16 +137,16 @@ async def test_the_review_shows_no_demo_notice_in_stars_mode(db, monkeypatch):
     stars_flow = Flow(monkeypatch, USER, mode="stars")
     fill_cart(USER, {TEXT: 1})
     await stars_flow.tap(checkout.route, "co:start")
-    assert "Demo mode" not in stars_flow.text and "Review your order" in stars_flow.text
+    assert "Demo mode" not in stars_flow.text and "Step 1 of 3 · Review" in stars_flow.text
 
 
 async def test_dropped_lines_are_mentioned_in_one_line(flow):
     fill_cart(USER, {TEXT: 1, 2: 1})
     variants_repo.set_active(2, False)
     await flow.tap(checkout.route, "co:start")
-    assert "1 unavailable item(s) were left out" in flow.text
+    assert "1 unavailable item was left out of this order." in flow.text
     await flow.tap(checkout.route, "co:pay")
-    assert "1 unavailable item(s) were left out" in flow.text
+    assert "1 unavailable item was left out of this order." in flow.text
     assert "ready" in flow.text
 
 
@@ -171,7 +171,7 @@ async def test_insufficient_stock_and_empty_cart_are_mapped(flow, monkeypatch):
         orders_repo, "create_order", lambda u, m: (_ for _ in ()).throw(InsufficientStock(KEY, 2))
     )
     await flow.tap(checkout.route, "co:pay")
-    assert "Only 2 left" in flow.text and "Back to cart" in flow.labels()
+    assert "Only 2 left" in flow.text and flow.data_for("‹ Back") == "cart:view"
 
     monkeypatch.setattr(
         orders_repo, "create_order", lambda u, m: (_ for _ in ()).throw(EmptyCartError())
@@ -186,7 +186,7 @@ async def test_a_provider_failure_cancels_the_order_and_restores_the_cart(flow, 
     flow.context.bot.send_message.side_effect = RuntimeError("telegram is down")
     await flow.tap(checkout.route, "co:pay")
 
-    assert "couldn't start the payment" in flow.text
+    assert "couldn&#x27;t start the payment" in flow.text
     assert orders_repo.get_open_for_user(USER) is None
     assert key_states(db) == {"available": 10}
     assert sorted(ln["variant_id"] for ln in cart_repo.list_lines(USER)) == [TEXT, KEY]

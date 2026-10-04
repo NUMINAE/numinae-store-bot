@@ -51,6 +51,22 @@ def empty_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def fresh_owner_notify() -> Iterator[None]:
+    """owner_notify keeps its rate-limit window in module state; every test starts
+    with no window open, whatever earlier tests did."""
+    from bot import owner_notify
+
+    def reset() -> None:
+        owner_notify._window_open = False
+        owner_notify._sent_count = 0
+        owner_notify._suppressed_count = 0
+
+    reset()
+    yield
+    reset()
+
+
 @pytest.fixture
 def clean_ratelimit() -> Iterator[None]:
     """The throttle keeps module-level state; isolate each test from it."""

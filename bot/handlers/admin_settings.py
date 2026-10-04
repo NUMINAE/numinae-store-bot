@@ -9,11 +9,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from ..keyboards import cb
-from ..render import bold, esc
+from ..render import esc
 from ..repo import admin_pending as pending_repo
 from ..repo import settings as settings_repo
 from ..tg import require_message, require_query, require_user
 from ..ui import show_screen
+from ..ui_kit import ICON, nav_row, screen, trim
 from . import admin_common
 from .admin_common import Invalid, Valid
 
@@ -26,6 +27,7 @@ SETTING_LABELS: dict[str, str] = {
 MIN_RESERVATION_MINUTES = 5
 MAX_RESERVATION_MINUTES = 60
 _PREVIEW_LEN = 40
+DETAIL_BUDGET = 700  # raw characters; all-"&" still fits one message
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +70,7 @@ def _notify_new_customers_enabled() -> bool:
 
 async def show_settings_root(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     rows = settings_repo.list_editable()
-    body = [bold("Settings"), ""]
+    body: list[str] = []
     for row in rows:
         label = SETTING_LABELS.get(row["key"], row["key"])
         preview = row["value"]
@@ -77,7 +79,7 @@ async def show_settings_root(update: Update, context: ContextTypes.DEFAULT_TYPE)
         body.append(f"{label}: {esc(preview) if preview else '(empty)'}")
     notify_on = _notify_new_customers_enabled()
     body.append(f"New customer notifications: {'ON' if notify_on else 'OFF'}")
-    text = "\n".join(body)
+    text = screen(ICON.settings, "Settings", "\n".join(body), crumbs=["Admin"])
 
     keyboard = InlineKeyboardMarkup(
         [
@@ -101,7 +103,7 @@ async def show_settings_root(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     callback_data=cb("adm", "set", "tgnc"),
                 )
             ],
-            [InlineKeyboardButton("Back to admin", callback_data=cb("adm", "home"))],
+            nav_row(back=cb("adm", "home")),
         ]
     )
     await show_screen(update, context, text=text, keyboard=keyboard)
@@ -120,11 +122,12 @@ async def show_setting_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     value = settings_repo.get(key, "")
     label = SETTING_LABELS[key]
-    text = f"{bold(label)}\n\n{esc(value) if value else '(empty)'}"
+    body = esc(trim(value, DETAIL_BUDGET)) if value else "(empty)"
+    text = screen(ICON.settings, label, body, crumbs=["Settings"])
     keyboard = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("Edit", callback_data=cb("adm", "set", "e", key))],
-            [InlineKeyboardButton("Back to settings", callback_data=cb("adm", "set"))],
+            nav_row(back=cb("adm", "set")),
         ]
     )
     await show_screen(update, context, text=text, keyboard=keyboard)
@@ -149,7 +152,7 @@ async def action_edit_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE,
         text = "Send the new welcome text (1–1000 characters). This cannot be empty."
 
     pending_repo.set(require_user(update).id, "set_value", target_key=key)
-    await admin_common.prompt(update, context, text)
+    await admin_common.prompt(update, context, esc(text), title=SETTING_LABELS[key])
 
 
 async def apply_set_value(update, context, target_key, context_id, raw) -> None:

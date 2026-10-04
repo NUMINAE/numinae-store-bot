@@ -22,13 +22,16 @@ from telegram import User
 from telegram.ext import ContextTypes
 
 from .config import get_settings
-from .render import bold, code, esc
+from .i18n import tn
+from .render import code, esc
 from .repo import customers as customers_repo
 from .repo import settings as settings_repo
+from .ui_kit import ICON, screen, trim
 
 logger = logging.getLogger(__name__)
 
 LIMIT_PER_WINDOW = 5
+NAME_BUDGET = 64
 WINDOW_SECONDS = 3600
 _ROLLUP_JOB_NAME = "new_customer_rollup"
 
@@ -63,15 +66,12 @@ async def notify_new_customer(context: ContextTypes.DEFAULT_TYPE, user: User) ->
 
 
 async def _send_individual(context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
-    lines = [
-        bold("New customer"),
-        esc(user.first_name) if user.first_name else "(no name)",
-    ]
+    lines = [esc(trim(user.first_name, NAME_BUDGET)) if user.first_name else "(no name)"]
     if user.username:
-        lines.append(f"@{esc(user.username)}")
+        lines.append(f"@{esc(trim(user.username, NAME_BUDGET))}")
     lines.append(code(user.id))
     lines.append(f"customer #{customers_repo.count_all()}")
-    text = "\n".join(lines)
+    text = screen(ICON.info, "New customer", "\n".join(lines))
     try:
         await context.bot.send_message(get_settings().owner_id, text)
     except Exception:
@@ -90,8 +90,7 @@ async def _rollup_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     if suppressed <= 0 or not _notifications_enabled():
         return
 
-    noun = "customer" if suppressed == 1 else "customers"
-    text = f"{suppressed} more new {noun} in the last hour"
+    text = tn("owner.more_customers", suppressed)
     try:
         await context.bot.send_message(get_settings().owner_id, text)
     except Exception:

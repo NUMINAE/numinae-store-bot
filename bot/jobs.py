@@ -24,7 +24,6 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from . import delivery
-from .handlers.common import get_lang
 from .handlers.payments import alert_owner, safe_send
 from .i18n import t
 from .keyboards import cb
@@ -32,6 +31,7 @@ from .render import bold
 from .repo import orders as orders_repo
 from .security import owner_only
 from .tg import require_message
+from .ui_kit import ICON
 
 logger = logging.getLogger(__name__)
 
@@ -79,14 +79,14 @@ class SweepReport(NamedTuple):
     expired: int
     delivered: int  # orders that finished delivering this pass
     failed: int  # orders with at least one item still undelivered
+    skipped: int = 0  # paid orders left alone because they are backing off
 
 
 async def _notify_expired(bot: Bot, order_id: int, user_id: int) -> None:
-    lang = get_lang(user_id)
     keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton(t("common.browse_button", lang), callback_data=cb("cat", "cats"))]]
+        [[InlineKeyboardButton(t("common.browse_button"), callback_data=cb("cat", "cats"))]]
     )
-    await safe_send(bot, user_id, t("jobs.order_expired", lang, id=order_id), reply_markup=keyboard)
+    await safe_send(bot, user_id, t("jobs.order_expired", id=order_id), reply_markup=keyboard)
 
 
 async def _attempt_delivery(bot: Bot, order_id: int) -> delivery.DeliveryResult | None:
@@ -124,6 +124,7 @@ async def run_sweep(bot: Bot, *, force: bool = False) -> SweepReport:
     expired = 0
     delivered = 0
     failed = 0
+    skipped = 0
 
     # 1. expiry
     try:
@@ -148,7 +149,9 @@ async def run_sweep(bot: Bot, *, force: bool = False) -> SweepReport:
         del _retry[stale]  # delivered, refunded or gone: forget its backoff
     for order in paid:
         order_id = order["id"]
-        if force or not _backing_off(order_id):
+        if not force and _backing_off(order_id):
+            skipped += 1
+        else:
             result = await _attempt_delivery(bot, order_id)
             if result is None or result.failed:
                 failed += 1
@@ -159,7 +162,7 @@ async def run_sweep(bot: Bot, *, force: bool = False) -> SweepReport:
         except Exception:
             logger.error("Sweep: stuck-order alert failed (order_id=%s)", order_id, exc_info=True)
 
-    return SweepReport(len(due) + len(paid), expired, delivered, failed)
+    return SweepReport(len(due) + len(paid) - skipped, expired, delivered, failed, skipped)
 
 
 async def _alert_if_stuck(bot: Bot, order_id: int) -> None:
@@ -171,7 +174,7 @@ async def _alert_if_stuck(bot: Bot, order_id: int) -> None:
     _alerted.add(order_id)
     await alert_owner(
         bot,
-        f"🚨 {bold(f'Order #{order_id} is paid but still undelivered')}\n"
+        f"{ICON.alert} {bold(f'Order #{order_id} is paid but still undelivered')}\n"
         f"Paid more than {OWNER_ALERT_AFTER_MINUTES} minutes ago. Buyer id: {order['user_id']}.\n"
         "Check the delivery content or fix and re-run /sweep.",
     )
@@ -180,7 +183,15 @@ async def _alert_if_stuck(bot: Bot, order_id: int) -> None:
 async def sweep_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """The recurring job. Never raises: a crash here would stop the schedule."""
     try:
-        await run_sweep(context.bot)
+        report = await run_sweep(context.bot)
+        logger.info(
+            "Sweep: examined=%s expired=%s delivered=%s failed=%s skipped=%s",
+            report.examined,
+            report.expired,
+            report.delivered,
+            report.failed,
+            report.skipped,
+        )
     except Exception:
         logger.error("Sweep pass crashed", exc_info=True)
 

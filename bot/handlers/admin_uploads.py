@@ -18,7 +18,7 @@ from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from ..config import get_settings
-from ..i18n import t
+from ..i18n import t, tn
 from ..keyboards import main_reply_keyboard
 from ..keyparse import MAX_KEYS_PER_BATCH, ParsedKeys, parse_keys
 from ..render import esc
@@ -27,7 +27,6 @@ from ..repo import license_keys as keys_repo
 from ..repo import variants as variants_repo
 from ..tg import require_message, require_user
 from . import admin_common
-from .common import get_lang
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +53,7 @@ async def file_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, varian
         await _expired(update)
         return
     pending_repo.set(require_user(update).id, PENDING_FILE, target_id=variant_id)
-    await admin_common.prompt(update, context, FILE_PROMPT)
+    await admin_common.prompt(update, context, esc(FILE_PROMPT), title="Upload file")
 
 
 async def keys_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, variant_id: int) -> None:
@@ -63,7 +62,7 @@ async def keys_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, varian
         await _expired(update)
         return
     pending_repo.set(require_user(update).id, PENDING_KEYS, target_id=variant_id)
-    await admin_common.prompt(update, context, KEYS_PROMPT)
+    await admin_common.prompt(update, context, esc(KEYS_PROMPT), title="Add keys")
 
 
 async def _expired(update: Update) -> None:
@@ -104,11 +103,10 @@ async def _finish(
     message = require_message(update)
     await message.reply_text(text)
     await admin_catalogue.show_variant_detail(update, context, variant_id)
-    lang = get_lang(user_id)
     await context.bot.send_message(
         chat_id=user_id,
-        text=t("common.menu_restored", lang),
-        reply_markup=main_reply_keyboard(lang),
+        text=t("common.menu_restored"),
+        reply_markup=main_reply_keyboard(),
     )
 
 
@@ -120,14 +118,14 @@ async def _finish(
 def key_report(parsed: ParsedKeys, added: int) -> str:
     """Counts and line numbers only: never any key text."""
     duplicates = parsed.duplicates + (len(parsed.valid) - added)
-    lines = [f"Added {added} key(s)."]
+    lines = [tn("admin.keys_added", added)]
     if duplicates:
-        lines.append(f"Skipped {duplicates} duplicate(s).")
+        lines.append(tn("admin.duplicates_skipped", duplicates))
     if parsed.invalid_lines:
         shown = parsed.invalid_lines[:MAX_INVALID_LINES_SHOWN]
         more = len(parsed.invalid_lines) - len(shown)
-        text = ", ".join(str(n) for n in shown) + (f" (and {more} more)" if more else "")
-        lines.append(f"Skipped {len(parsed.invalid_lines)} invalid line(s): {text}.")
+        text = ", ".join(str(n) for n in shown) + (f" {tn('admin.and_more', more)}" if more else "")
+        lines.append(tn("admin.invalid_lines", len(parsed.invalid_lines), lines=text))
     if parsed.over_limit:
         lines.append(f"Over the limit: only the first {MAX_KEYS_PER_BATCH} keys were used.")
     return "\n".join(lines)

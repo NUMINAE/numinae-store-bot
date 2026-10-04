@@ -38,8 +38,3 @@ def count_all() -> int:
     conn = get_conn()
     row = conn.execute("SELECT COUNT(*) AS c FROM customers").fetchone()
     return row["c"]
-
-
-def set_language(user_id: int, language: str) -> None:
-    with transaction() as conn:
-        conn.execute("UPDATE customers SET language = ? WHERE user_id = ?", (language, user_id))

@@ -13,7 +13,7 @@ from bot.keyboards import MENU_LABELS
 from .conftest import OWNER_ID
 from .helpers import make_context, make_message, make_update
 
-LABELS = [(lang, label) for lang, labels in MENU_LABELS.items() for label in labels]
+LABELS = list(MENU_LABELS)
 ACTION_BY_INDEX = ["show_categories", "show_cart", "show_library"]
 
 
@@ -40,9 +40,9 @@ def _assert_only(targets, expected: str | None):
             mock.assert_not_called()
 
 
-@pytest.mark.parametrize(("lang", "label"), LABELS)
-async def test_exact_labels_dispatch_in_both_languages(targets, lang, label):
-    index = MENU_LABELS[lang].index(label)
+@pytest.mark.parametrize("label", LABELS)
+async def test_exact_labels_dispatch(targets, label):
+    index = MENU_LABELS.index(label)
     update = make_update(1001, message=make_message(label))
     assert await router._dispatch_menu_button(update, make_context(), label) is True
     _assert_only(targets, ACTION_BY_INDEX[index])
@@ -60,9 +60,9 @@ NEAR_MISSES = [
 ]
 
 
-@pytest.mark.parametrize(("lang", "label"), LABELS)
+@pytest.mark.parametrize("label", LABELS)
 @pytest.mark.parametrize("template", NEAR_MISSES)
-async def test_lines_that_merely_contain_a_label_do_not_dispatch(targets, lang, label, template):
+async def test_lines_that_merely_contain_a_label_do_not_dispatch(targets, label, template):
     text = template.format(label=label, lower=label.lower(), upper=label.upper())
     update = make_update(1001, message=make_message(text))
     assert await router._dispatch_menu_button(update, make_context(), text) is False
@@ -76,7 +76,7 @@ async def test_unrelated_text_does_not_dispatch(targets):
 
 
 async def test_route_text_dispatches_an_exact_label_before_anything_else(db, targets):
-    label = MENU_LABELS["ru"][1]
+    label = MENU_LABELS[1]
     update = make_update(1001, message=make_message(label))
     await router.route_text(update, make_context())
     _assert_only(targets, "show_cart")
@@ -93,9 +93,30 @@ async def test_route_text_does_not_dispatch_a_longer_line_containing_a_label(
     sentinel = AsyncMock()
     monkeypatch.setattr(router.admin_catalogue, "handle_pending_input", sentinel)
 
-    text = f"Best {MENU_LABELS['en'][0]} in town"
+    text = f"Best {MENU_LABELS[0]} in town"
     update = make_update(OWNER_ID, message=make_message(text))
     await router.route_text(update, make_context())
 
     sentinel.assert_awaited_once()
+    _assert_only(targets, None)
+
+
+def _from_code_points(codes: str) -> str:
+    """No Cyrillic literal in the source: build the old labels from hex code points."""
+    return "".join(chr(int(code, 16)) for code in codes.split())
+
+
+FORMER_RUSSIAN_LABELS = (
+    _from_code_points(
+        "041f 0440 043e 0441 043c 043e 0442 0440 0020 0442 043e 0432 0430 0440 043e 0432"
+    ),
+    _from_code_points("041a 043e 0440 0437 0438 043d 0430"),
+    _from_code_points("041c 043e 044f 0020 0431 0438 0431 043b 0438 043e 0442 0435 043a 0430"),
+)
+
+
+@pytest.mark.parametrize("label", FORMER_RUSSIAN_LABELS)
+async def test_the_former_russian_labels_no_longer_dispatch(targets, label):
+    update = make_update(1001, message=make_message(label))
+    assert await router._dispatch_menu_button(update, make_context(), label) is False
     _assert_only(targets, None)

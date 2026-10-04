@@ -12,7 +12,9 @@ from telegram.constants import ParseMode
 
 from ..i18n import t
 from ..keyboards import cb
-from ..render import bold, esc, stars
+from ..render import bold, stars
+from ..summary import summary_lines
+from ..ui_kit import ICON, screen
 
 
 class MockProvider:
@@ -24,28 +26,32 @@ class MockProvider:
         chat_id: int,
         order: sqlite3.Row,
         items: Sequence[sqlite3.Row],
-        lang: str,
     ) -> None:
         order_id = order["id"]
-        lines = [
-            bold(t("pay.mock_banner", lang)),
-            "",
-            bold(t("pay.mock_heading", lang, id=order_id)),
-        ]
-        for item in items:
-            name = esc(f"{item['product_name']} — {item['variant_label']}")
-            lines.append(f"{name} × {item['quantity']} — {stars(item['line_total_stars'])}")
-        lines += ["", bold(t("pay.mock_total", lang, total=stars(order["total_stars"])))]
+        lines = summary_lines(
+            items,
+            lambda i: f"{i['product_name']} — {i['variant_label']}",
+            lambda i: i["quantity"],
+            lambda i: i["line_total_stars"],
+        )
+        total = bold(t("pay.mock_total", total=stars(order["total_stars"])))
+        body = "\n".join([bold(t("pay.mock_banner")), "", *lines, "", total])
+        text = screen(
+            ICON.paid,
+            t("pay.mock_heading", id=order_id),
+            body,
+            step=(2, 3, "Payment"),
+        )
         keyboard = InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
-                        t("pay.mock_pay_button", lang), callback_data=cb("co", "mockpay", order_id)
+                        t("pay.mock_pay_button"), callback_data=cb("co", "mockpay", order_id)
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        t("pay.cancel_order_button", lang),
+                        t("pay.cancel_order_button"),
                         callback_data=cb("co", "cancel", order_id),
                     )
                 ],
@@ -53,7 +59,7 @@ class MockProvider:
         )
         await bot.send_message(
             chat_id=chat_id,
-            text="\n".join(lines),
+            text=text,
             parse_mode=ParseMode.HTML,
             reply_markup=keyboard,
         )

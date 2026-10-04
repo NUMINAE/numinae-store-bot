@@ -208,6 +208,12 @@ REJECTIONS = [
 ]
 
 
+def test_every_payability_rejection_reason_has_a_test_asserting_its_customer_message():
+    from bot.payments.checks import PayRejection
+
+    assert {r.value for r in PayRejection} <= {name for name, _, _ in REJECTIONS}
+
+
 @pytest.mark.parametrize(("name", "setup", "message"), REJECTIONS, ids=[r[0] for r in REJECTIONS])
 async def test_each_rejection_reason_answers_not_ok_with_its_message(db, name, setup, message):
     context = stars_context()
@@ -220,16 +226,6 @@ async def test_each_rejection_reason_answers_not_ok_with_its_message(db, name, s
     query.answer.assert_awaited_once_with(ok=False, error_message=message)
     state_after = (key_states(db), snapshot(order_id) if orders_repo.get(order_id) else None)
     assert state_after == state_before  # a refusal changes nothing, not even the expiry
-
-
-async def test_rejection_messages_are_translated(db):
-    order_id = place_order(USER, {TEXT: 1})
-    customers_repo.set_language(USER, "ru")
-    orders_repo.cancel_order(order_id, "customer")
-    query = await run_pre_checkout(stars_context(), order_id)
-    assert query.answer.await_args.kwargs["error_message"] == (
-        "Этот заказ больше не ожидает оплаты."
-    )
 
 
 async def test_an_unexpected_error_still_answers_not_ok_and_logs(db, monkeypatch, caplog):
@@ -560,14 +556,6 @@ async def test_paysupport_replies_with_the_escaped_support_note(db):
     (text,) = [c.args[0] for c in message.reply_text.await_args_list]
     assert "quote your order number" in text.lower()
     assert "&lt;b&gt;help@example.com&lt;/b&gt; &amp; quote it" in text
-
-
-async def test_paysupport_is_localised(db):
-    add_customer(USER)
-    customers_repo.set_language(USER, "ru")
-    message = make_message("/paysupport")
-    await payments.paysupport(make_update(USER, message=message), stars_context())
-    assert "номер заказа" in message.reply_text.await_args.args[0]
 
 
 def test_parse_order_id():

@@ -17,19 +17,17 @@ from ..keyboards import MENU_ACTION_BY_LABEL, main_reply_keyboard
 from ..repo import admin_pending as admin_pending_repo
 from ..tg import require_message, require_text, require_user
 from . import admin_catalogue, catalogue, library
-from .common import get_lang, render_main_menu, touch_customer
+from .common import render_main_menu, touch_customer
 
 logger = logging.getLogger(__name__)
 
 
-async def _restore_reply_keyboard(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> None:
+async def _restore_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
     await context.bot.send_message(
         chat_id=chat.id if chat is not None else require_user(update).id,
-        text=t("common.menu_restored", lang),
-        reply_markup=main_reply_keyboard(lang),
+        text=t("common.menu_restored"),
+        reply_markup=main_reply_keyboard(),
     )
 
 
@@ -39,9 +37,8 @@ async def _dispatch_menu_button(
     """Persistent-reply-keyboard taps arrive here as plain text messages, so
     they're matched by exact string only — never substring/startswith/
     case-fold — before any other branch gets a chance at the message.
-    MENU_ACTION_BY_LABEL covers every label across both languages (see
-    keyboards.py), so a customer who just switched language and still has
-    the other language's keyboard cached doesn't get a dead button. Returns
+    MENU_ACTION_BY_LABEL holds exactly the three English reply-keyboard
+    labels (see keyboards.py). Returns
     True if the label matched and the update was handled.
 
     cart is imported locally to keep this module's import graph shallow.
@@ -77,7 +74,7 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 # fell back to the dashboard — either way nothing more is
                 # expected to be typed. If validation failed instead, the
                 # pending row is still there and the keyboard stays hidden.
-                await _restore_reply_keyboard(update, context, get_lang(user.id))
+                await _restore_reply_keyboard(update, context)
             return
         # No pending admin input: fall through to the nudge so the owner can
         # still test the shop with their own account.
@@ -87,9 +84,8 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def nudge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = require_user(update).id
-    lang = get_lang(user_id)
-    menu_text, keyboard = render_main_menu(user_id, lang)
+    menu_text, keyboard = render_main_menu(user_id)
     await require_message(update).reply_text(
-        t("common.nudge", lang, menu=menu_text),
+        t("common.nudge", menu=menu_text),
         reply_markup=keyboard,
     )

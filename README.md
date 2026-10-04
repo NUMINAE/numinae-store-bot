@@ -4,6 +4,10 @@ A Telegram bot storefront for digital goods — files, licence keys and guides f
 
 **Status: work in progress.** Browsing, the cart, checkout (Telegram Stars or a demo mode), delivery, the customer library and the admin tools (uploads, keys, orders, refunds, stats) work.
 
+## Requirements
+
+Python 3.11 or newer, and **SQLite 3.35 or newer** — migration 0004 uses `ALTER TABLE ... DROP COLUMN`, which older SQLite versions lack. Python's bundled SQLite is normally newer; check with `python -c "import sqlite3; print(sqlite3.sqlite_version)"`. The bot is English-only.
+
 ## Setup (Windows / VS Code)
 
 1. Activate the virtual environment:
@@ -104,11 +108,24 @@ bot/
   security.py      owner_only decorator
   render.py        HTML escaping and Stars formatting
   keyboards.py     reply keyboard and callback-data helpers
-  i18n.py          English / Russian customer strings
+  i18n.py          customer-facing strings (t / tn) and the icon placeholders
+  ui_kit.py        the design language: ICON, screen(), nav_row(), pager(), trimming
+  summary.py       order / cart summary lines shared by checkout, payment and receipt
+  profile.py       the bot's Telegram profile: command menus and descriptions
   repo/            query functions
   handlers/        command and callback handlers
 data/              gitignored, created at runtime
 ```
+
+## Design language
+
+Every screen is built with `bot/ui_kit.py`: an icon and bold title, an optional breadcrumb and "Step N of M" line, then the body; the inline keyboard always ends with a nav row (Back, Home), except Home itself. Emoji come from one table (`ICON`), separators are fixed (` · ` between metadata, ` — ` between a label and its price), and lists are capped so the worst case stays under Telegram's 4096-character limit.
+
+CUSTOMER-FACING text lives in `bot/i18n.py` behind `t()` and `tn()` (plurals). Admin screens are English literals in the handlers; only admin messages that contain a plural use `tn()`.
+
+## Bot profile
+
+On startup the bot sets its Telegram profile (`bot/profile.py`): the default command menu lists only customer commands (`/start`, `/library`, `/paysupport`); the owner's chat additionally lists `/admin`, `/order` and `/sweep`, plus the bot description and short description. This is best-effort: a failure is logged as a warning and never stops the bot. If the owner's menu could not be set because the owner has never opened the chat, it is retried the first time the owner sends `/start`.
 
 ## Development
 

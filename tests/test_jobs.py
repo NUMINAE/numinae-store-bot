@@ -64,7 +64,7 @@ async def test_the_sweep_expires_releases_and_notifies_once(db):
 
     report = await jobs.run_sweep(bot)
 
-    assert report == (1, 1, 0, 0)
+    assert report == (1, 1, 0, 0, 0)
     assert orders_repo.get(order_id)["status"] == "expired"
     assert key_states(db) == {"available": 10}
     (notice,) = texts_to(bot, USER)
@@ -73,7 +73,7 @@ async def test_the_sweep_expires_releases_and_notifies_once(db):
     assert [b.text for row in markup.inline_keyboard for b in row] == ["Browse products"]
 
     again = await jobs.run_sweep(bot)  # nothing left to expire, so no second notice
-    assert again == (0, 0, 0, 0)
+    assert again == (0, 0, 0, 0, 0)
     assert len(texts_to(bot, USER)) == 1
 
 
@@ -134,18 +134,18 @@ async def test_delivery_is_retried_and_succeeds_on_the_next_pass(db, clock):
     broken.send_message.side_effect = Forbidden("blocked")
 
     first = await jobs.run_sweep(broken)
-    assert first == (1, 0, 0, 1)  # examined 1, one order failed
+    assert first == (1, 0, 0, 1, 0)  # examined 1, one order failed
     assert orders_repo.get(order_id)["status"] == "paid"
 
     clock[0] += 61  # past the one-minute backoff
     healthy = fake_bot()
     second = await jobs.run_sweep(healthy)
-    assert second == (1, 0, 1, 0)
+    assert second == (1, 0, 1, 0, 0)
     assert orders_repo.get(order_id)["status"] == "delivered"
     assert any("example.com/demo" in t for t in texts_to(healthy, USER))
 
     third = await jobs.run_sweep(healthy)
-    assert third == (0, 0, 0, 0)  # delivered orders are no longer examined
+    assert third == (0, 0, 0, 0, 0)  # delivered orders are no longer examined
 
 
 async def test_one_orders_delivery_crash_does_not_stop_the_others(db, monkeypatch, caplog):
@@ -241,7 +241,7 @@ async def test_a_pass_survives_failures_in_each_stage(db, monkeypatch, caplog):
         "list_paid_undelivered_orders",
         lambda: (_ for _ in ()).throw(RuntimeError("listing")),
     )
-    assert await jobs.run_sweep(fake_bot()) == (0, 0, 0, 0)
+    assert await jobs.run_sweep(fake_bot()) == (0, 0, 0, 0, 0)
     messages = " ".join(r.getMessage() for r in caplog.records)
     assert "expiry pass failed" in messages and "could not list paid orders" in messages
 
@@ -322,7 +322,7 @@ async def test_a_failing_order_is_retried_on_the_backoff_schedule(db, clock, cap
     clock[0] += 29
     await jobs.run_sweep(bot)  # t=59s: still backing off
     assert attempts(bot) == 1 and error_count(caplog) == 1  # one ERROR per attempt, not per sweep
-    assert skipped == (1, 0, 0, 0)  # examined, but not attempted
+    assert skipped == (0, 0, 0, 0, 1)  # not examined: left alone, counted as skipped
 
     clock[0] += 2  # t=61s: past the 1-minute backoff -> attempt 2, next in 2 min
     await jobs.run_sweep(bot)
@@ -441,3 +441,79 @@ async def test_the_stuck_order_alert_still_fires_while_backing_off(db, clock):
     age_payment(db, order_id, 45)
     await jobs.run_sweep(bot)  # skipped for backoff, but the alert is independent
     assert len([m for m in texts_to(bot, OWNER_ID) if "still undelivered" in m]) == 1
+
+
+# --- skipped orders in the sweep report ---------------------------------------------------------
+
+
+async def test_backed_off_orders_are_reported_as_skipped_not_examined(db, clock):
+    order_id = place_order(USER, {TEXT: 1})
+    pay(order_id)
+    other = place_order(OTHER, {TEXT: 1})
+    pay(other)
+    bot = fake_bot()
+    bot.send_message.side_effect = Forbidden("everyone blocked us")
+    await jobs.run_sweep(bot)  # both fail: both back off
+    assert {order_id, other} <= set(jobs._retry)
+
+    report = await jobs.run_sweep(fake_bot())  # inside the backoff: nothing attempted
+
+    assert report == (0, 0, 0, 0, 2)
+    assert report.skipped == 2 and report.examined == 0
+    assert orders_repo.get(order_id)["status"] == "paid"
+
+    clock[0] += 61  # past the backoff: attempted, no longer skipped
+    later = await jobs.run_sweep(fake_bot())
+    assert later == (2, 0, 2, 0, 0)
+
+
+async def test_skipped_and_examined_are_split_when_only_some_orders_back_off(db, clock):
+    failing = place_order(USER, {TEXT: 1})
+    pay(failing)
+    await jobs.run_sweep(blocked_bot())  # `failing` backs off
+    fresh = place_order(OTHER, {TEXT: 1})
+    pay(fresh)
+
+    report = await jobs.run_sweep(fake_bot())
+
+    assert (report.examined, report.delivered, report.skipped) == (1, 1, 1)
+    assert orders_repo.get(fresh)["status"] == "delivered"
+    assert orders_repo.get(failing)["status"] == "paid"
+
+
+async def test_sweep_command_forces_past_the_backoff_and_has_no_skipped_text(db, clock):
+    add_customer(OWNER_ID)
+    order_id = place_order(USER, {TEXT: 1})
+    pay(order_id)
+    await jobs.run_sweep(blocked_bot())
+    message = make_message("/sweep")
+
+    await jobs.sweep_command(make_update(OWNER_ID, message=message), make_context())
+
+    reply = message.reply_text.await_args.args[0]
+    assert reply == "Sweep done: examined 1, expired 0, delivered 1, failed 0."
+    assert "skipped" not in reply  # the owner's command never skips, so it never says so
+    assert orders_repo.get(order_id)["status"] == "delivered"
+
+
+async def test_the_scheduled_run_reports_skipped_for_an_order_in_backoff(db, clock, caplog):
+    order_id = place_order(USER, {TEXT: 1})
+    pay(order_id)
+    await jobs.run_sweep(blocked_bot())  # the first attempt fails: backoff starts
+    caplog.set_level(logging.INFO)
+    caplog.clear()
+
+    await jobs.sweep_job(make_context())  # the scheduled job, inside the backoff
+
+    records = [r.getMessage() for r in caplog.records if r.name == "bot.jobs"]
+    assert "Sweep: examined=0 expired=0 delivered=0 failed=0 skipped=1" in records
+    assert orders_repo.get(order_id)["status"] == "paid"
+
+
+async def test_the_scheduled_run_logs_zero_skipped_when_nothing_backs_off(db, clock, caplog):
+    caplog.set_level(logging.INFO)
+    await jobs.sweep_job(make_context())
+    assert any(
+        "Sweep: examined=0 expired=0 delivered=0 failed=0 skipped=0" in r.getMessage()
+        for r in caplog.records
+    )

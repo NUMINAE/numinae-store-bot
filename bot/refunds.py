@@ -20,6 +20,7 @@ from typing import NamedTuple
 
 from telegram import Bot
 
+from .i18n import tn
 from .payments.registry import build_provider
 from .redact import redact
 from .repo import orders as orders_repo
@@ -104,4 +105,4 @@ async def _refund_order(bot: Bot, order_id: int, actor: str) -> RefundResult:
             exc_info=True,
         )
         return RefundResult(RefundStatus.DB_FAILED_AFTER_REFUND, _short(type(exc).__name__))
-    return RefundResult(RefundStatus.REFUNDED, f"{revoked} key(s) revoked")
+    return RefundResult(RefundStatus.REFUNDED, tn("admin.keys_revoked", revoked))

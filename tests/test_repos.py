@@ -144,14 +144,14 @@ def test_customer_upsert_reports_first_appearance(db):
     assert customers_repo.upsert(1001, "ann", "Ann") is True
     assert customers_repo.upsert(1001, "ann2", "Ann B") is False
     row = customers_repo.get(1001)
-    assert (row["username"], row["first_name"], row["language"]) == ("ann2", "Ann B", "en")
+    assert (row["username"], row["first_name"]) == ("ann2", "Ann B")
     assert customers_repo.count_all() == 1
 
 
-def test_customer_language(db):
+def test_customers_have_no_language_column(db):
     customers_repo.upsert(1001, None, None)
-    customers_repo.set_language(1001, "ru")
-    assert customers_repo.get(1001)["language"] == "ru"
+    assert "language" not in set(customers_repo.get(1001).keys())
+    assert not hasattr(customers_repo, "set_language")
 
 
 def test_customer_get_missing_is_none(db):

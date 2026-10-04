@@ -40,7 +40,7 @@ def order_and_items(lines=None, mode="stars") -> tuple[Any, Any]:
 async def test_stars_invoice_arguments(db):
     order, items = order_and_items()
     bot = fake_bot()
-    await StarsProvider().present_checkout(bot, USER, order, items, "en")
+    await StarsProvider().present_checkout(bot, USER, order, items)
 
     (call,) = bot.send_invoice.await_args_list
     kwargs = call.kwargs
@@ -58,7 +58,7 @@ async def test_stars_invoice_arguments(db):
 async def test_the_pay_button_is_first_and_cancel_is_on_a_later_row(db):
     order, items = order_and_items()
     bot = fake_bot()
-    await StarsProvider().present_checkout(bot, USER, order, items, "en")
+    await StarsProvider().present_checkout(bot, USER, order, items)
     rows = bot.send_invoice.await_args_list[0].kwargs["reply_markup"].inline_keyboard
     assert rows[0][0].pay is True and "175" in rows[0][0].text
     assert len(rows[0]) == 1
@@ -69,7 +69,7 @@ async def test_the_pay_button_is_first_and_cancel_is_on_a_later_row(db):
 async def test_the_invoice_arguments_bind_to_the_installed_bot_signature(db):
     order, items = order_and_items()
     bot = fake_bot()
-    await StarsProvider().present_checkout(bot, USER, order, items, "en")
+    await StarsProvider().present_checkout(bot, USER, order, items)
     kwargs = bot.send_invoice.await_args_list[0].kwargs
     inspect.signature(Bot.send_invoice).bind(object(), **kwargs)
 
@@ -81,7 +81,7 @@ async def test_long_titles_and_descriptions_are_truncated_to_telegrams_limits(db
     ] * 3
     big_order = {**dict(order), "id": 10**9}
     bot = fake_bot()
-    await StarsProvider().present_checkout(bot, USER, big_order, long_items, "en")
+    await StarsProvider().present_checkout(bot, USER, big_order, long_items)
     kwargs = bot.send_invoice.await_args_list[0].kwargs
     assert len(kwargs["title"]) <= InvoiceLimit.MAX_TITLE_LENGTH
     assert len(kwargs["description"]) <= InvoiceLimit.MAX_DESCRIPTION_LENGTH
@@ -106,7 +106,7 @@ async def test_invoice_text_is_plain_not_html_escaped(db):
     order, items = order_and_items({TEXT: 1})
     hostile = [{**dict(items[0]), "product_name": "<b>&"}]
     bot = fake_bot()
-    await StarsProvider().present_checkout(bot, USER, order, hostile, "en")
+    await StarsProvider().present_checkout(bot, USER, order, hostile)
     kwargs = bot.send_invoice.await_args_list[0].kwargs
     assert "<b>&" in kwargs["description"]
     assert "parse_mode" not in kwargs
@@ -135,7 +135,7 @@ async def test_stars_refund_failure_returns_false_and_logs(caplog):
 async def test_mock_checkout_shows_a_demo_banner_and_the_demo_buttons(db):
     order, items = order_and_items(mode="mock")
     bot = fake_bot()
-    await MockProvider().present_checkout(bot, USER, order, items, "en")
+    await MockProvider().present_checkout(bot, USER, order, items)
 
     (call,) = bot.send_message.await_args_list
     assert "DEMO MODE" in call.kwargs["text"] and "no real payment" in call.kwargs["text"]
@@ -154,7 +154,7 @@ async def test_mock_checkout_escapes_hostile_names(db):
     order, items = order_and_items({TEXT: 1}, mode="mock")
     hostile = [{**dict(items[0]), "product_name": "<b>&"}]
     bot = fake_bot()
-    await MockProvider().present_checkout(bot, USER, order, hostile, "en")
+    await MockProvider().present_checkout(bot, USER, order, hostile)
     assert "&lt;b&gt;&amp;" in bot.send_message.await_args_list[0].kwargs["text"]
 
 

@@ -21,7 +21,6 @@ class PaymentProvider(Protocol):
         chat_id: int,
         order: sqlite3.Row,
         items: Sequence[sqlite3.Row],
-        lang: str,
     ) -> None:
         """Show the customer how to pay for this pending order."""
         ...

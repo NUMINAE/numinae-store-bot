@@ -90,7 +90,7 @@ def test_orders_without_key_lines_need_no_reservation(db):
 def test_every_rejection_has_a_translated_message():
     assert set(REJECTION_MESSAGE_KEY) == set(PayRejection)
     for key in REJECTION_MESSAGE_KEY.values():
-        assert set(STRINGS[key]) == {"en", "ru"}
+        assert isinstance(STRINGS[key], str) and STRINGS[key].strip()
 
 
 def test_missing_and_foreign_orders_share_one_message():

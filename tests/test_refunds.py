@@ -61,7 +61,7 @@ async def test_a_stars_order_is_refunded_with_its_own_charge_id_and_keys_are_rev
 
     result = await refund_order(bot, order_id, "owner")
 
-    assert result == RefundResult(RefundStatus.REFUNDED, "3 key(s) revoked")
+    assert result == RefundResult(RefundStatus.REFUNDED, "3 keys revoked")
     bot.refund_star_payment.assert_awaited_once_with(
         user_id=USER, telegram_payment_charge_id="ch_abc"
     )

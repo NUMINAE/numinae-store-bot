@@ -109,19 +109,23 @@ An order starts as `pending_payment` with its licence keys reserved. It becomes 
 
 ## Purchase flow
 
+This is the successful path. A payment that arrives after its order expired, or a second charge for an order that is already paid, is refunded automatically, and a delivery that fails is retried by the background sweep.
+
 ```mermaid
 sequenceDiagram
     actor C as Customer
-    participant B as Bot
     participant T as Telegram
+    participant B as Bot
     participant D as Database
-    C->>B: Add editions to the cart
+    C->>T: Add editions to the cart
+    T->>B: Update from the customer
     B->>D: Store the cart lines
-    C->>B: Checkout, then Pay
+    C->>T: Checkout, then tap Pay in the bot
+    T->>B: Update from the customer
     B->>D: Create the order and reserve keys (one transaction)
     B->>T: Send the Stars invoice
     T->>C: Show the invoice
-    C->>T: Pay
+    C->>T: Pay the invoice
     T->>B: pre_checkout_query
     B->>D: Check order, payer, amount, expiry and reservation, then extend it
     B->>T: Answer ok

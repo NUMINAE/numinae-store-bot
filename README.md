@@ -1,6 +1,6 @@
 # Numinae Store
 
-[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![CI](https://github.com/NUMINAE/numinae-store-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/NUMINAE/numinae-store-bot/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12 and 3.14](https://img.shields.io/badge/python-3.12_and_3.14-blue.svg)](pyproject.toml)
 

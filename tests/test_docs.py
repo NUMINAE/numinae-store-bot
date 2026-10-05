@@ -188,6 +188,25 @@ def path_problems(text: str, root: Path = ROOT) -> list[str]:
     return problems
 
 
+WORKFLOW_REFERENCE = re.compile(r"actions/workflows/([^/\s)#?]+\.ya?ml)")
+
+
+def workflow_problems(text: str, root: Path = ROOT) -> list[str]:
+    """Every ".../actions/workflows/<file>.yml" the README mentions (the CI badge and its
+    link are absolute URLs, which path_problems ignores) must name a file that exists
+    in .github/workflows/."""
+    return [
+        f"no workflow file {name}"
+        for name in WORKFLOW_REFERENCE.findall(text)
+        if not (root / ".github" / "workflows" / name).is_file()
+    ]
+
+
+def test_every_workflow_the_readme_points_at_exists():
+    assert len(WORKFLOW_REFERENCE.findall(read())) >= 2  # the badge and its link
+    assert workflow_problems(read()) == []
+
+
 def test_every_relative_path_and_link_in_the_readme_exists():
     assert path_problems(read()) == []
 
@@ -197,7 +216,7 @@ def test_the_allowlist_is_small_and_every_entry_is_explained():
     assert len(RUNTIME_PATHS) <= 10
 
 
-def test_the_path_check_fails_on_a_typod_repository_path_in_an_edited_copy(tmp_path):
+def test_the_path_check_fails_on_a_typoed_repository_path_in_an_edited_copy(tmp_path):
     text = read()
     assert "`bot/concurrency.py`" in text and "(SECURITY.md)" in text
     typo_in_backticks = text.replace("`bot/concurrency.py`", "`bot/concurency.py`", 1)
@@ -213,8 +232,15 @@ def test_the_path_check_fails_on_a_typod_repository_path_in_an_edited_copy(tmp_p
         assert edited != text, name
         copy = tmp_path / f"README-{name}.md"
         copy.write_text(edited, encoding="utf-8")  # temporary copy only
-        assert path_problems(read(copy)), f"typo in {name} was not detected"
+        if name == "workflow":
+            # the badge URLs are external, so path_problems ignores them by design;
+            # workflow_problems is the check that must catch this typo
+            assert workflow_problems(read(copy)), "typo in workflow was not detected"
+            assert path_problems(read(copy)) == []
+        else:
+            assert path_problems(read(copy)), f"typo in {name} was not detected"
     assert path_problems(text) == []  # the real README is clean
+    assert workflow_problems(text) == []
 
 
 def test_allowlisted_runtime_paths_do_not_hide_a_typo_next_to_them(tmp_path):

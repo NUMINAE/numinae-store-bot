@@ -123,7 +123,7 @@ sequenceDiagram
     T->>C: Show the invoice
     C->>T: Pay
     T->>B: pre_checkout_query
-    B->>D: Check order, payer, amount, expiry and reservation; extend it
+    B->>D: Check order, payer, amount, expiry and reservation, then extend it
     B->>T: Answer ok
     T->>B: successful_payment
     B->>D: Mark paid, store the charge id, sell the keys (one transaction)

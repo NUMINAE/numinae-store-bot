@@ -317,3 +317,42 @@ def test_the_licence_is_mit_with_the_owners_holder_name():
     licence = (ROOT / "LICENSE").read_text(encoding="utf-8")
     assert licence.startswith("MIT License")
     assert "Copyright (c) 2026 NUMINAE" in licence
+
+
+# --- Mermaid diagrams ---------------------------------------------------------------------------
+
+# Mermaid reads ";" as a statement separator and "#" as the start of an entity code, so
+# neither may appear in a diagram. Rendering itself cannot be tested here (no Mermaid
+# toolchain); it is verified only on GitHub. This catches the known class of parse error.
+MERMAID_FORBIDDEN = (";", "#")
+
+
+def mermaid_problems(text: str) -> list[str]:
+    problems = []
+    for number, block in enumerate(re.findall(r"```mermaid\n(.*?)```", text, re.S), start=1):
+        for line_number, line in enumerate(block.splitlines(), start=1):
+            for char in MERMAID_FORBIDDEN:
+                if char in line:
+                    problems.append(
+                        f"diagram {number}, line {line_number}: {char!r} in {line.strip()!r}"
+                    )
+    return problems
+
+
+def test_no_mermaid_block_contains_a_semicolon_or_a_hash():
+    assert len(re.findall(r"```mermaid\n", read())) >= 3  # the three diagrams are really scanned
+    assert mermaid_problems(read()) == []
+
+
+def test_the_mermaid_check_is_not_vacuous_it_fails_on_an_edited_copy(tmp_path):
+    text = read()
+    old = "expiry and reservation, then extend it"
+    assert old in text
+    for char in MERMAID_FORBIDDEN:
+        copy = tmp_path / f"README-{ord(char)}.md"
+        copy.write_text(
+            text.replace(old, f"expiry and reservation{char} extend it", 1), encoding="utf-8"
+        )
+        found = mermaid_problems(read(copy))  # a temporary copy; the real README is untouched
+        assert len(found) == 1 and repr(char) in found[0]
+    assert mermaid_problems(text) == []

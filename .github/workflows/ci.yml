@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-  pull_request:
+    branches: [master]  # branches only: a tag does not start a run
+  pull_request:  # all branches
+  workflow_dispatch:
   schedule:
     # Weekly, so new advisories against our dependencies are caught without a push.
     - cron: "23 5 * * 1"
@@ -120,3 +122,50 @@ jobs:
           set -e
           test "$code" -eq 1
           test "$out" = "no heartbeat"
+
+      - name: Startup under the compose restrictions
+        # Runs the image the way docker-compose.yml does. With a fake token the bot is
+        # expected to start, apply its migrations, then exit 1 when Telegram rejects the
+        # token. Env values are passed by name (-e NAME) and never echoed.
+        run: |
+          VOL="numinae-ci-data-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          OUT="$(mktemp)"
+          cleanup() {
+            docker rm -f "$VOL-bot" >/dev/null 2>&1 || true
+            docker volume rm -f "$VOL" >/dev/null 2>&1 || true
+            rm -f "$OUT"
+          }
+          trap cleanup EXIT
+          docker volume create "$VOL" >/dev/null
+
+          # Shaped like a real token (digits, a colon, 35 URL-safe characters) so the
+          # redaction is exercised; built from parts, and a fake.
+          BOT_TOKEN="123456789:AAH$(printf 'x%.0s' $(seq 32))"
+          export BOT_TOKEN OWNER_ID=1 PAYMENT_MODE=mock SEED_DEMO=true
+
+          set +e
+          timeout 180 docker run --rm --init --name "$VOL-bot" \
+            --read-only --tmpfs /tmp \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --volume "$VOL":/app/data \
+            -e BOT_TOKEN -e OWNER_ID -e PAYMENT_MODE -e SEED_DEMO \
+            numinae-store:ci >"$OUT" 2>&1
+          code=$?
+          set -e
+
+          fail() { echo "FAILED: $1" >&2; echo "--- container output ---" >&2; cat "$OUT" >&2; exit 1; }
+
+          test "$code" -eq 1 || fail "expected exit code 1, got $code"
+          grep -qF "DEMO MODE: Pay (demo) grants real content without payment." "$OUT" \
+            || fail "no mock-mode DEMO warning"
+          grep -qF "Applied migration" "$OUT" || fail "no 'Applied migration' line"
+          for bad in "Permission denied" "readonly database" "Read-only file system" \
+              "unable to open database"; do
+            if grep -qiF "$bad" "$OUT"; then fail "output contains: $bad"; fi
+          done
+          if grep -qE '[0-9]{8,10}:[A-Za-z0-9_-]{35}' "$OUT"; then fail "token-shaped text in output"; fi
+
+          # A second container on the same volume: the database exists and is owned by 10001.
+          owner="$(docker run --rm --volume "$VOL":/app/data --entrypoint python numinae-store:ci \
+            -c 'import os; print(os.stat("data/shop.db").st_uid)')"
+          test "$owner" = "10001" || fail "data/shop.db owner is not 10001"

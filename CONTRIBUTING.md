@@ -30,6 +30,11 @@ ruff format --check .
 mypy
 ```
 
+CI (`.github/workflows/ci.yml`) also builds the Docker image and starts it under the
+restrictions of `docker-compose.yml` with a fake token, so a change that makes the image
+need a writable root filesystem or extra privileges fails there; you do not need Docker
+locally to contribute.
+
 New code needs tests. Tests never print or require real tokens; build token-shaped
 strings from parts.
 

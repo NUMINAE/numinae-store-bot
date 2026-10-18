@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 
 # ---- builder: turn the source into a wheel ------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 WORKDIR /build
 COPY pyproject.toml README.md LICENSE ./
 COPY bot ./bot
 RUN pip wheel --no-cache-dir --no-deps --wheel-dir /dist .
 
 # ---- runtime: install only the wheel ------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 # PYTHONUNBUFFERED: logs appear immediately.
 # PYTHONDONTWRITEBYTECODE: the root filesystem is read-only in docker-compose.yml.
